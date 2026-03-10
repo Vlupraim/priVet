@@ -1,0 +1,315 @@
+﻿<!doctype html>
+<html lang="es">
+  <head>
+    <!-- Metadatos base -->
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Privet | Panel de Transcripcion</title>
+
+    <!-- Tipografias del panel -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cherry+Bomb+One&family=Playfair+Display:wght@600;700&family=Quicksand:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Hoja de estilos principal -->
+    <link rel="stylesheet" href="./assets/css/styles.css" />
+  </head>
+  <body>
+    <!-- Fondo decorativo global -->
+    <div class="bg-layer" aria-hidden="true"></div>
+
+    <!-- Contenedor principal de toda la aplicacion -->
+    <main class="admin-shell">
+      <!-- Barra superior: titulo -->
+      <header class="admin-top">
+        <!-- Titulo del sistema -->
+        <div class="title-box">
+          <h1>SERVICIOS VETERINARIOS PRIVET</h1>
+        </div>
+      </header>
+
+      <!-- Grid principal: navegacion lateral + contenido -->
+      <div class="admin-grid">
+        <!-- Sidebar de navegacion interna -->
+        <aside class="admin-sidebar" aria-label="Navegacion de panel">
+          <!-- Logo flotante en columna izquierda -->
+          <button
+            id="logoHomeBtn"
+            class="logo-box logo-box--button sidebar-logo"
+            type="button"
+            aria-label="Ir a tipeos"
+            title="Ir a tipeos"
+          >
+            <img
+              src="./assets/img/Ari Vet Logito sin texto (1).png"
+              alt="Logo Privet"
+              class="brand-logo"
+            />
+          </button>
+
+          <nav class="sidebar-nav" aria-label="Secciones">
+            <button type="button" class="side-item is-active" data-target="tipeosPanel">
+              Tipeos
+            </button>
+            <button type="button" class="side-item" data-target="resultPanel">Resultados</button>
+            <button type="button" class="side-item" data-target="analysisPanel">Analisis</button>
+          </nav>
+        </aside>
+
+        <!-- Zona principal donde se muestran los paneles -->
+        <section class="admin-main">
+          <div class="panel-stack">
+            <!-- Panel 1: configuracion y envio de transcripcion -->
+            <article id="tipeosPanel" class="admin-view is-active" aria-labelledby="tipeosTitle">
+              <div class="view-head">
+                <h2 id="tipeosTitle">Configuracion de transcripcion</h2>
+                <p>Define parametros y ejecuta la transcripcion desde este modulo.</p>
+              </div>
+
+              <!-- Formulario principal de transcripcion -->
+              <form id="transcriptionForm" class="form" novalidate>
+                <!-- Selector del tipo de fuente (URL o archivo) -->
+                <fieldset class="mode-selector" aria-label="Modo de entrada">
+                  <legend>Fuente del audio</legend>
+                  <label class="mode-pill">
+                    <input type="radio" name="inputMode" value="url" checked />
+                    <span>Usar URL</span>
+                  </label>
+                  <label class="mode-pill">
+                    <input type="radio" name="inputMode" value="file" />
+                    <span>Subir archivo</span>
+                  </label>
+                </fieldset>
+
+                <!-- Grupo URL -->
+                <div class="field-group" id="urlGroup">
+                  <label for="urlInput">URL de audio o video</label>
+                  <input
+                    id="urlInput"
+                    name="url"
+                    type="url"
+                    placeholder="https://www.youtube.com/watch?v=..."
+                    autocomplete="off"
+                  />
+                  <small>Pega un enlace publico cuando uses modo URL.</small>
+                </div>
+
+                <!-- Grupo archivo -->
+                <div class="field-group hidden" id="fileGroup">
+                  <label for="fileInput">Archivo de audio</label>
+                  <input
+                    id="fileInput"
+                    name="file"
+                    type="file"
+                    accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg,.webm"
+                  />
+                  <small>Formatos comunes: mp3, wav, m4a, flac, ogg.</small>
+                </div>
+
+                <!-- Configuracion complementaria: idioma + formato -->
+                <div class="grid two-cols">
+                  <div class="field-group">
+                    <label for="languageSelect">Idioma</label>
+                    <select id="languageSelect" name="language">
+                      <option value="auto" selected>auto</option>
+                      <option value="es">es (Espanol)</option>
+                      <option value="en">en (Ingles)</option>
+                      <option value="pt">pt (Portugues)</option>
+                      <option value="other">Otro codigo...</option>
+                    </select>
+                    <!-- Input extra para idioma personalizado -->
+                    <input
+                      id="customLanguage"
+                      class="hidden"
+                      type="text"
+                      placeholder="Ej: fr, de, it"
+                      maxlength="10"
+                      autocomplete="off"
+                    />
+                  </div>
+
+                  <div class="field-group field-group--format" id="formatGroup">
+                    <label for="formatSelect">Formato</label>
+                    <select id="formatSelect" name="format">
+                      <option
+                        value="flat"
+                        selected
+                        title="Texto corrido, sin separacion por hablantes."
+                      >
+                        flat
+                      </option>
+                      <option
+                        value="diarized"
+                        title="Separa por hablantes y puede incluir marcas de tiempo."
+                      >
+                        diarized
+                      </option>
+                    </select>
+                    <!-- Tooltip contextual del formato -->
+                    <small id="formatHelpFloating" class="format-help" aria-live="polite"></small>
+                  </div>
+                </div>
+
+                <!-- Nombre del archivo de salida -->
+                <div class="field-group">
+                  <label for="outputNameInput">Nombre del archivo .txt</label>
+                  <input
+                    id="outputNameInput"
+                    name="outputName"
+                    type="text"
+                    placeholder="Ej: clase41endocrinopaolaledesma1010"
+                    maxlength="120"
+                    autocomplete="off"
+                  />
+                  <small>Si lo dejas vacio, se usa un nombre automatico con fecha.</small>
+                </div>
+
+                <!-- Vista rapida del curl equivalente -->
+                <p class="endpoint-text">
+                  Curl equivalente:
+                  <code id="curlPreview"></code>
+                </p>
+
+                <!-- Opciones adicionales -->
+                <div class="inline-options">
+                  <label class="checkbox">
+                    <input type="checkbox" id="mockMode" />
+                    <span>Usar modo mock</span>
+                  </label>
+                  <p class="hint">Util cuando no tienes acceso a VPN o backend.</p>
+                </div>
+
+                <!-- Estado del formulario -->
+                <div id="setupNotice" class="notice notice--idle" role="status" aria-live="polite">
+                  Listo para configurar y transcribir.
+                </div>
+
+                <!-- Acciones del formulario -->
+                <div class="actions">
+                  <button id="submitBtn" type="submit" class="btn btn--primary">Transcribir</button>
+                  <button id="clearBtn" type="button" class="btn btn--ghost">Limpiar</button>
+                </div>
+              </form>
+            </article>
+
+            <!-- Panel 2: historial de resultados + detalle -->
+            <article id="resultPanel" class="admin-view" aria-labelledby="resultTitle">
+              <div class="view-head">
+                <h2 id="resultTitle">Resultados historicos</h2>
+                <p>Aqui se guardan todos los tipeos realizados y puedes revisar su detalle.</p>
+              </div>
+
+              <!-- Estado de solicitudes del backend -->
+              <div id="statusBox" class="status status--idle" role="status" aria-live="polite">
+                Esperando una solicitud...
+              </div>
+
+              <!-- Indicador de carga -->
+              <div id="loadingBox" class="loading hidden" aria-hidden="true">
+                <span class="spinner"></span>
+                <p>Procesando audio. Esto puede tardar unos segundos.</p>
+              </div>
+
+              <!-- Controles superiores del historial -->
+              <div class="history-controls">
+                <p id="historyMeta" class="history-meta">Total: 0 resultados</p>
+
+                <label class="page-size-control" for="pageSizeSelect">
+                  Mostrar
+                  <select id="pageSizeSelect" class="page-size-select">
+                    <option value="10" selected>10</option>
+                    <option value="20">20</option>
+                    <option value="30">30</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                  </select>
+                  por pagina
+                </label>
+              </div>
+
+              <!-- Tabla de historial -->
+              <div class="history-table-wrap">
+                <table class="history-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Fecha</th>
+                      <th>Fuente</th>
+                      <th>Idioma</th>
+                      <th>Formato</th>
+                      <th>Tipo</th>
+                      <th>Resumen</th>
+                      <th>Accion</th>
+                    </tr>
+                  </thead>
+                  <tbody id="historyTableBody"></tbody>
+                </table>
+
+                <!-- Mensaje cuando no hay historial -->
+                <p id="historyEmpty" class="history-empty hidden">
+                  Todavia no hay resultados historicos.
+                </p>
+              </div>
+
+              <!-- Paginacion numerada -->
+              <div id="historyPagination" class="history-pagination" aria-label="Paginacion"></div>
+
+              <!-- Detalle del registro seleccionado -->
+              <div class="result-detail">
+                <div class="view-head view-head--row view-head--compact">
+                  <h3>Detalle seleccionado</h3>
+                  <div class="result-actions">
+                    <button id="copyBtn" class="btn btn--small btn--ghost" type="button" disabled>
+                      Copiar
+                    </button>
+                    <button
+                      id="downloadBtn"
+                      class="btn btn--small btn--ghost"
+                      type="button"
+                      disabled
+                    >
+                      Descargar .txt
+                    </button>
+                  </div>
+                </div>
+
+                <label for="resultText" class="visually-hidden">Transcripcion</label>
+                <textarea
+                  id="resultText"
+                  rows="12"
+                  placeholder="Selecciona un resultado historico para ver el detalle..."
+                  readonly
+                ></textarea>
+              </div>
+
+              <!-- Endpoint visible para debug rapido -->
+              <p class="endpoint-text">
+                Endpoint configurado:
+                <code id="endpointPreview"></code>
+              </p>
+            </article>
+
+            <!-- Panel 3: analisis (placeholder temporal) -->
+            <article id="analysisPanel" class="admin-view" aria-labelledby="analysisTitle">
+              <div class="view-head">
+                <h2 id="analysisTitle">Analisis</h2>
+                <p>Pagina en construccion.</p>
+              </div>
+
+              <p id="analysisText" class="analysis-copy">Pagina en construccion.</p>
+            </article>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Configuracion runtime (inyectada por Docker o valor local por defecto) -->
+    <script src="./assets/js/runtime-config.js"></script>
+
+    <!-- Logica principal de la aplicacion -->
+    <script src="./assets/js/app.js"></script>
+  </body>
+</html>
