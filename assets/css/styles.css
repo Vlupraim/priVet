@@ -153,6 +153,7 @@ button {
 }
 
 .logo-box--button:hover .brand-logo {
+  animation-play-state: paused;
   transform: translateX(10%) scale(1.06);
 }
 
@@ -437,6 +438,10 @@ textarea:focus {
   border-top: 1px dashed var(--line-soft);
   border-bottom: 1px dashed var(--line-soft);
   padding: 10px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  align-items: center;
 }
 
 .checkbox {
@@ -452,7 +457,8 @@ textarea:focus {
 }
 
 .hint {
-  margin: 7px 0 0;
+  flex-basis: 100%;
+  margin: 0;
   font-size: 0.88rem;
   color: var(--ink-500);
 }
@@ -514,6 +520,14 @@ textarea:focus {
   box-shadow: 0 10px 18px rgba(127, 73, 165, 0.18);
 }
 
+.btn:focus-visible,
+.side-item:focus-visible,
+.history-action:focus-visible,
+.pagination-btn:focus-visible {
+  outline: 3px solid rgba(226, 56, 139, 0.3);
+  outline-offset: 2px;
+}
+
 .btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -531,6 +545,11 @@ textarea:focus {
 
 .btn--ghost {
   background: rgba(255, 255, 255, 0.72);
+}
+
+.btn--danger {
+  color: var(--danger);
+  border-color: rgba(229, 62, 134, 0.28);
 }
 
 .btn--small {
@@ -622,6 +641,13 @@ textarea:focus {
   width: auto;
   min-width: 84px;
   padding: 6px 8px;
+}
+
+.history-toolbar {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .history-table-wrap {
@@ -787,24 +813,79 @@ textarea {
 /* =========================================================
    16) Panel de analisis
    ========================================================= */
-.analysis-copy {
-  margin: 0 0 14px;
-  border: 1.4px solid var(--line-soft);
-  border-radius: 14px;
-  background: var(--surface-strong);
-  padding: 12px;
-  line-height: 1.45;
+.analysis-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(260px, 0.9fr);
+  gap: 12px;
 }
 
-.analysis-config {
+.analysis-block {
   border: 1.4px solid var(--line-soft);
   border-radius: 14px;
   background: var(--surface-strong);
   padding: 12px;
 }
 
-.analysis-config h3 {
+.analysis-block--wide {
+  grid-column: 1 / -1;
+}
+
+.analysis-block h3 {
   margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.analysis-copy {
+  margin: 0;
+  line-height: 1.45;
+  color: var(--ink-700);
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.metric-item {
+  min-height: 74px;
+  border-radius: 12px;
+  border: 1px solid rgba(179, 129, 214, 0.26);
+  background: linear-gradient(145deg, rgba(255, 79, 162, 0.1), rgba(138, 72, 255, 0.08));
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  padding: 10px;
+}
+
+.metric-item strong {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.metric-item span {
+  color: var(--ink-700);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.meta-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(90px, 0.45fr) minmax(0, 1fr);
+  gap: 8px 10px;
+}
+
+.meta-list dt {
+  color: var(--ink-500);
+  font-weight: 700;
+}
+
+.meta-list dd {
+  margin: 0;
+  color: var(--ink-900);
+  font-weight: 600;
+  word-break: break-word;
 }
 
 .config-list {
@@ -902,11 +983,11 @@ textarea {
 @keyframes pulseLogo {
   0%,
   100% {
-    transform: scale(1);
+    transform: translateX(10%) scale(1);
   }
 
   50% {
-    transform: scale(1.03);
+    transform: translateX(10%) scale(1.03);
   }
 }
 
@@ -1005,6 +1086,10 @@ textarea {
 
   .history-table {
     min-width: 840px;
+  }
+
+  .analysis-board {
+    grid-template-columns: 1fr;
   }
 
   textarea {

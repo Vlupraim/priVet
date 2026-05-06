@@ -6,4 +6,4 @@ services:
     ports:
       - "8080:80"
     environment:
-      API_BASE_URL: "https://whisper-skynet.bourbaki-lab.duckdns.org"
+      API_BASE_URL: "${API_BASE_URL:-https://whisper-skynet.bourbaki-lab.duckdns.org}"

@@ -33,12 +33,13 @@ const CONFIG = {
  * de tipeos entre recargas del navegador.
  */
 const HISTORY_STORAGE_KEY = "privet_history_v1";
+const MAX_HISTORY_ITEMS = 200;
 
 /**
  * textos de apoyo para explicar el formato elegido.
  */
 const FORMAT_DESCRIPTIONS = {
-  flat: "Texto corrido, sin separacion por hablantes.",
+  flat: "Texto corrido, sin separación por hablantes.",
   diarized: "Separa por hablantes y puede incluir marcas de tiempo.",
 };
 
@@ -83,11 +84,14 @@ const formatSelect = document.getElementById("formatSelect");
 const formatHelpFloating = document.getElementById("formatHelpFloating");
 const outputNameInput = document.getElementById("outputNameInput");
 const mockModeCheckbox = document.getElementById("mockMode");
+const saveHistoryCheckbox = document.getElementById("saveHistory");
 
 const submitBtn = document.getElementById("submitBtn");
 const clearBtn = document.getElementById("clearBtn");
 const copyBtn = document.getElementById("copyBtn");
 const downloadBtn = document.getElementById("downloadBtn");
+const deleteSelectedBtn = document.getElementById("deleteSelectedBtn");
+const clearHistoryBtn = document.getElementById("clearHistoryBtn");
 
 const setupNotice = document.getElementById("setupNotice");
 const statusBox = document.getElementById("statusBox");
@@ -96,6 +100,8 @@ const resultText = document.getElementById("resultText");
 const endpointPreview = document.getElementById("endpointPreview");
 const curlPreview = document.getElementById("curlPreview");
 const analysisText = document.getElementById("analysisText");
+const analysisMetrics = document.getElementById("analysisMetrics");
+const analysisMetaList = document.getElementById("analysisMetaList");
 const configSummary = document.getElementById("configSummary");
 
 const historyMeta = document.getElementById("historyMeta");
@@ -136,7 +142,11 @@ function activatePanel(panelId) {
   sideItems.forEach((item) => {
     const isActive = item.dataset.target === panelId;
     item.classList.toggle("is-active", isActive);
-    item.setAttribute("aria-current", isActive ? "page" : "false");
+    if (isActive) {
+      item.setAttribute("aria-current", "page");
+    } else {
+      item.removeAttribute("aria-current");
+    }
   });
 
   const currentView = panelViews.find((view) => view.classList.contains("is-active"));
@@ -286,7 +296,7 @@ function syncCurlPreview() {
 function syncFormatHelp() {
   const selectedFormat = formatSelect.value;
   const description =
-    FORMAT_DESCRIPTIONS[selectedFormat] || "Formato de salida de la transcripcion.";
+    FORMAT_DESCRIPTIONS[selectedFormat] || "Formato de salida de la transcripción.";
 
   formatSelect.title = description;
 
@@ -343,6 +353,7 @@ function syncConfigSummary() {
     `Formato: ${formatSelect.value}`,
     `Salida txt: ${resolveOutputFileName({ forPreview: true })}`,
     `Modo mock: ${mockModeCheckbox.checked ? "Activado" : "Desactivado"}`,
+    `Historial local: ${saveHistoryCheckbox?.checked ? "Activado" : "Desactivado"}`,
   ];
 
   configSummary.innerHTML = "";
@@ -354,13 +365,97 @@ function syncConfigSummary() {
   });
 }
 
+function createMetricItem(label, value) {
+  const item = document.createElement("div");
+  item.className = "metric-item";
+
+  const valueNode = document.createElement("strong");
+  valueNode.textContent = String(value);
+
+  const labelNode = document.createElement("span");
+  labelNode.textContent = label;
+
+  item.appendChild(valueNode);
+  item.appendChild(labelNode);
+  return item;
+}
+
+function createMetaItem(label, value) {
+  const term = document.createElement("dt");
+  const description = document.createElement("dd");
+
+  term.textContent = label;
+  description.textContent = value;
+
+  return [term, description];
+}
+
+function countDetectedSpeakers(text) {
+  const matches = String(text || "").match(/\b(?:hablante|speaker)\s*\d+\b/gi) || [];
+  const normalized = matches.map((match) => match.toLowerCase().replace(/\s+/g, " "));
+  return new Set(normalized).size;
+}
+
 /**
- * mantiene el panel de analisis como placeholder mientras
- * esa seccion se implementa completamente.
+ * mantiene el panel de análisis sincronizado con el resultado activo.
  */
 function syncAnalysisPreview() {
-  if (!analysisText) return;
-  analysisText.textContent = "Pagina en construccion.";
+  const selectedEntry = state.selectedHistoryId
+    ? getHistoryEntryById(state.selectedHistoryId)
+    : null;
+  const text = selectedEntry?.text || state.lastResult || "";
+  const normalizedText = text.trim();
+  const words = normalizedText ? normalizedText.split(/\s+/).length : 0;
+  const lines = normalizedText
+    ? normalizedText.split(/\r?\n/).filter((line) => line.trim()).length
+    : 0;
+  const speakerCount = countDetectedSpeakers(normalizedText);
+
+  if (analysisText) {
+    analysisText.textContent = normalizedText
+      ? buildPreview(normalizedText, 360)
+      : "Selecciona o genera un resultado para ver su análisis.";
+  }
+
+  if (analysisMetrics) {
+    analysisMetrics.innerHTML = "";
+    [
+      ["Palabras", words],
+      ["Caracteres", normalizedText.length],
+      ["Líneas", lines],
+      ["Hablantes", speakerCount || "N/D"],
+    ].forEach(([label, value]) => {
+      analysisMetrics.appendChild(createMetricItem(label, value));
+    });
+  }
+
+  if (analysisMetaList) {
+    analysisMetaList.innerHTML = "";
+
+    const metaEntries = selectedEntry
+      ? [
+          ["Fuente", selectedEntry.sourceLabel || "Sin fuente"],
+          ["Idioma", selectedEntry.language || "auto"],
+          ["Formato", selectedEntry.format || "flat"],
+          ["Tipo", selectedEntry.executionType === "mock" ? "Mock" : "Real"],
+          ["Estado", selectedEntry.persisted === false ? "Temporal" : "Guardado local"],
+          ["Fecha", formatDateLabel(selectedEntry.createdAt)],
+        ]
+      : [
+          ["Fuente", "Sin resultado seleccionado"],
+          ["Idioma", resolveLanguageValue() || "Sin definir"],
+          ["Formato", formatSelect.value || "flat"],
+          ["Tipo", mockModeCheckbox.checked ? "Mock" : "Real"],
+          ["Estado", saveHistoryCheckbox?.checked ? "Guardado local" : "Temporal"],
+          ["Fecha", "Sin fecha"],
+        ];
+
+    metaEntries.forEach(([label, value]) => {
+      const [term, description] = createMetaItem(label, value);
+      analysisMetaList.appendChild(term);
+      analysisMetaList.appendChild(description);
+    });
+  }
 }
 
 /**
@@ -400,7 +495,10 @@ function getHistoryEntryById(id) {
  */
 function saveHistoryToStorage() {
   try {
-    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(state.history));
+    const persistedHistory = state.history
+      .filter((entry) => entry.persisted !== false)
+      .slice(0, MAX_HISTORY_ITEMS);
+    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(persistedHistory));
   } catch {
     // si falla almacenamiento, la app sigue operativa en memoria.
   }
@@ -420,6 +518,7 @@ function loadHistoryFromStorage() {
 
     state.history = parsed
       .filter((item) => item && typeof item === "object")
+      .slice(0, MAX_HISTORY_ITEMS)
       .map((item) => ({
         id: String(item.id || `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`),
         createdAt: typeof item.createdAt === "string" ? item.createdAt : new Date().toISOString(),
@@ -431,6 +530,7 @@ function loadHistoryFromStorage() {
         outputFileName: String(item.outputFileName || ""),
         text: String(item.text || ""),
         preview: String(item.preview || buildPreview(String(item.text || ""))),
+        persisted: item.persisted === false ? false : true,
       }));
   } catch {
     state.history = [];
@@ -456,6 +556,7 @@ function createHistoryEntry(transcriptionText, outputFileName) {
     outputFileName: outputFileName || resolveOutputFileName(),
     text: transcriptionText,
     preview: buildPreview(transcriptionText),
+    persisted: saveHistoryCheckbox?.checked !== false,
   };
 }
 
@@ -471,6 +572,9 @@ function selectHistoryEntry(entryId) {
 
   copyBtn.disabled = state.isLoading || !state.lastResult;
   downloadBtn.disabled = state.isLoading || !state.lastResult;
+  if (deleteSelectedBtn) {
+    deleteSelectedBtn.disabled = state.isLoading || !selected;
+  }
 
   syncAnalysisPreview();
 }
@@ -567,7 +671,10 @@ function renderHistoryTable() {
   const total = state.history.length;
   const totalPages = getTotalPages();
 
-  historyMeta.textContent = `Total: ${total} resultados | Pagina ${state.currentPage}/${totalPages}`;
+  historyMeta.textContent = `Total: ${total} resultados | Página ${state.currentPage}/${totalPages}`;
+  if (clearHistoryBtn) {
+    clearHistoryBtn.disabled = state.isLoading || total === 0;
+  }
 
   historyTableBody.innerHTML = "";
 
@@ -605,7 +712,8 @@ function renderHistoryTable() {
     formatCell.textContent = entry.format;
 
     const typeCell = document.createElement("td");
-    typeCell.textContent = entry.executionType;
+    typeCell.textContent =
+      entry.persisted === false ? `${entry.executionType} / temporal` : entry.executionType;
 
     const previewCell = document.createElement("td");
     previewCell.className = "history-preview";
@@ -649,6 +757,7 @@ function renderHistory() {
  */
 function addHistoryEntry(entry) {
   state.history.unshift(entry);
+  state.history = state.history.slice(0, MAX_HISTORY_ITEMS);
   state.selectedHistoryId = entry.id;
   state.currentPage = 1;
   saveHistoryToStorage();
@@ -672,22 +781,22 @@ function validateForm() {
     try {
       new URL(url);
     } catch {
-      return "La URL no tiene un formato valido.";
+      return "La URL no tiene un formato válido.";
     }
   } else if (!fileInput.files || fileInput.files.length === 0) {
     return "Debes seleccionar un archivo de audio.";
   }
 
   if (!language) {
-    return "Debes indicar un codigo de idioma.";
+    return "Debes indicar un código de idioma.";
   }
 
   if (!/^[a-z]{2,8}(-[a-z]{2,8})?$/i.test(language) && language !== "auto") {
-    return "El codigo de idioma no es valido (ej: es, en, pt, fr-ca).";
+    return "El código de idioma no es válido (ej: es, en, pt, fr-ca).";
   }
 
   if (!["flat", "diarized"].includes(format)) {
-    return "Formato no valido. Debe ser flat o diarized.";
+    return "Formato no válido. Debe ser flat o diarized.";
   }
 
   return null;
@@ -723,8 +832,15 @@ function setResultStatus({ loading, statusType, statusText }) {
   clearBtn.disabled = loading;
   copyBtn.disabled = loading || !state.lastResult;
   downloadBtn.disabled = loading || !state.lastResult;
+  if (deleteSelectedBtn) {
+    deleteSelectedBtn.disabled = loading || !state.selectedHistoryId;
+  }
+  if (clearHistoryBtn) {
+    clearHistoryBtn.disabled = loading || state.history.length === 0;
+  }
 
   loadingBox.classList.toggle("hidden", !loading);
+  loadingBox.setAttribute("aria-hidden", loading ? "false" : "true");
   statusBox.className = `status status--${statusType}`;
   statusBox.textContent = statusText;
 
@@ -748,7 +864,7 @@ async function mockTranscriptionRequest(formData) {
   const sourceLabel = hasUrl ? formData.get("url") : formData.get("file")?.name || "archivo";
 
   if (!sourceLabel) {
-    throw new Error("Mock: faltan datos para generar la transcripcion.");
+    throw new Error("Mock: faltan datos para generar la transcripción.");
   }
 
   if (format === "diarized") {
@@ -761,11 +877,36 @@ async function mockTranscriptionRequest(formData) {
   }
 
   return [
-    "Esta es una transcripcion simulada en modo mock.",
+    "Esta es una transcripción simulada en modo mock.",
     `Idioma: ${language}.`,
     `Fuente: ${sourceLabel}.`,
     "Activa el endpoint real para obtener resultados de Whisper.",
   ].join(" ");
+}
+
+function normalizeTranscriptionResponse(responseText) {
+  const rawText = String(responseText || "");
+
+  try {
+    const parsed = JSON.parse(rawText);
+    if (typeof parsed === "string") return parsed;
+
+    if (parsed && typeof parsed === "object") {
+      const candidates = [
+        parsed.text,
+        parsed.transcription,
+        parsed.transcript,
+        parsed.result,
+        parsed.output,
+      ];
+      const textValue = candidates.find((value) => typeof value === "string" && value.trim());
+      if (textValue) return textValue;
+    }
+  } catch {
+    // el backend actual responde texto plano; JSON es solo compatibilidad extra.
+  }
+
+  return rawText;
 }
 
 /**
@@ -785,14 +926,15 @@ async function realTranscriptionRequest(formData) {
     if (!response.ok) {
       const possibleError = await response.text().catch(() => "");
       throw new Error(
-        `HTTP ${response.status}. ${possibleError || "El backend rechazo la solicitud."}`
+        `HTTP ${response.status}. ${possibleError || "El backend rechazó la solicitud."}`
       );
     }
 
-    return await response.text();
+    const responseText = await response.text();
+    return normalizeTranscriptionResponse(responseText);
   } catch (error) {
     if (error.name === "AbortError") {
-      throw new Error("La solicitud excedio el tiempo maximo de espera.");
+      throw new Error("La solicitud excedió el tiempo máximo de espera.");
     }
 
     throw error;
@@ -822,7 +964,7 @@ async function handleSubmit(event) {
     return;
   }
 
-  setSetupNotice("loading", "Configuracion valida. Iniciando transcripcion...");
+  setSetupNotice("loading", "Configuración válida. Iniciando transcripción...");
 
   setResultStatus({
     loading: true,
@@ -845,16 +987,16 @@ async function handleSubmit(event) {
     setSetupNotice(
       "ok",
       useMock
-        ? "Transcripcion mock generada correctamente."
-        : "Transcripcion recibida correctamente."
+        ? "Transcripción mock generada correctamente."
+        : "Transcripción recibida correctamente."
     );
 
     setResultStatus({
       loading: false,
       statusType: "ok",
       statusText: useMock
-        ? "Transcripcion mock generada correctamente."
-        : "Transcripcion recibida correctamente.",
+        ? "Transcripción mock generada correctamente."
+        : "Transcripción recibida correctamente.",
     });
 
     activatePanel("resultPanel");
@@ -884,7 +1026,7 @@ function handleClear() {
   syncFormatHelp();
   syncCurlPreview();
 
-  setSetupNotice("idle", "Formulario reiniciado. Listo para nueva transcripcion.");
+  setSetupNotice("idle", "Formulario reiniciado. Listo para nueva transcripción.");
 
   setResultStatus({
     loading: false,
@@ -907,13 +1049,13 @@ async function handleCopy() {
     setResultStatus({
       loading: false,
       statusType: "ok",
-      statusText: "Transcripcion copiada al portapapeles.",
+      statusText: "Transcripción copiada al portapapeles.",
     });
   } catch {
     setResultStatus({
       loading: false,
       statusType: "error",
-      statusText: "No se pudo copiar automaticamente. Copia manualmente.",
+      statusText: "No se pudo copiar automáticamente. Copia manualmente.",
     });
   }
 }
@@ -940,6 +1082,61 @@ function handleDownload() {
   link.remove();
 
   URL.revokeObjectURL(url);
+}
+
+/**
+ * elimina solo el registro seleccionado del historial visible.
+ */
+function handleDeleteSelected() {
+  if (!state.selectedHistoryId) return;
+
+  const selectedIndex = state.history.findIndex((entry) => entry.id === state.selectedHistoryId);
+  if (selectedIndex < 0) return;
+
+  state.history.splice(selectedIndex, 1);
+
+  const nextEntry = state.history[Math.min(selectedIndex, state.history.length - 1)] || null;
+  state.selectedHistoryId = nextEntry ? nextEntry.id : null;
+
+  saveHistoryToStorage();
+
+  if (nextEntry) {
+    selectHistoryEntry(nextEntry.id);
+  } else {
+    selectHistoryEntry(null);
+  }
+
+  renderHistory();
+
+  setResultStatus({
+    loading: false,
+    statusType: "ok",
+    statusText: "Resultado eliminado del historial.",
+  });
+}
+
+/**
+ * limpia historial local y resultados temporales de la sesión.
+ */
+function handleClearHistory() {
+  if (state.history.length === 0) return;
+
+  const shouldClear = window.confirm("¿Borrar todo el historial de este navegador?");
+  if (!shouldClear) return;
+
+  state.history = [];
+  state.selectedHistoryId = null;
+  state.currentPage = 1;
+
+  saveHistoryToStorage();
+  selectHistoryEntry(null);
+  renderHistory();
+
+  setResultStatus({
+    loading: false,
+    statusType: "idle",
+    statusText: "Historial borrado. Esperando una solicitud...",
+  });
 }
 
 /**
@@ -983,6 +1180,12 @@ function bindEvents() {
   clearBtn.addEventListener("click", handleClear);
   copyBtn.addEventListener("click", handleCopy);
   downloadBtn.addEventListener("click", handleDownload);
+  if (deleteSelectedBtn) {
+    deleteSelectedBtn.addEventListener("click", handleDeleteSelected);
+  }
+  if (clearHistoryBtn) {
+    clearHistoryBtn.addEventListener("click", handleClearHistory);
+  }
 
   // el logo funciona como acceso directo al panel de tipeos.
   if (logoHomeBtn) {
@@ -995,14 +1198,25 @@ function bindEvents() {
     syncCustomLanguageUI();
     syncConfigSummary();
     syncCurlPreview();
+    syncAnalysisPreview();
   });
 
   customLanguageInput.addEventListener("input", () => {
     syncConfigSummary();
     syncCurlPreview();
+    syncAnalysisPreview();
   });
 
-  mockModeCheckbox.addEventListener("change", syncConfigSummary);
+  mockModeCheckbox.addEventListener("change", () => {
+    syncConfigSummary();
+    syncAnalysisPreview();
+  });
+  if (saveHistoryCheckbox) {
+    saveHistoryCheckbox.addEventListener("change", () => {
+      syncConfigSummary();
+      syncAnalysisPreview();
+    });
+  }
 
   urlInput.addEventListener("input", () => {
     syncConfigSummary();
@@ -1041,6 +1255,7 @@ function bindEvents() {
       syncInputModeUI();
       syncConfigSummary();
       syncCurlPreview();
+      syncAnalysisPreview();
     });
   });
 

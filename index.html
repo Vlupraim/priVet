@@ -4,7 +4,7 @@
     <!-- Metadatos base -->
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Privet | Panel de Transcripcion</title>
+    <title>Privet | Panel de Transcripción</title>
 
     <!-- Tipografias del panel -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -51,11 +51,31 @@
           </button>
 
           <nav class="sidebar-nav" aria-label="Secciones">
-            <button type="button" class="side-item is-active" data-target="tipeosPanel">
+            <button
+              type="button"
+              class="side-item is-active"
+              data-target="tipeosPanel"
+              aria-controls="tipeosPanel"
+              aria-current="page"
+            >
               Tipeos
             </button>
-            <button type="button" class="side-item" data-target="resultPanel">Resultados</button>
-            <button type="button" class="side-item" data-target="analysisPanel">Analisis</button>
+            <button
+              type="button"
+              class="side-item"
+              data-target="resultPanel"
+              aria-controls="resultPanel"
+            >
+              Resultados
+            </button>
+            <button
+              type="button"
+              class="side-item"
+              data-target="analysisPanel"
+              aria-controls="analysisPanel"
+            >
+              Análisis
+            </button>
           </nav>
         </aside>
 
@@ -65,8 +85,8 @@
             <!-- Panel 1: configuracion y envio de transcripcion -->
             <article id="tipeosPanel" class="admin-view is-active" aria-labelledby="tipeosTitle">
               <div class="view-head">
-                <h2 id="tipeosTitle">Configuracion de transcripcion</h2>
-                <p>Define parametros y ejecuta la transcripcion desde este modulo.</p>
+                <h2 id="tipeosTitle">Configuración de transcripción</h2>
+                <p>Define parámetros y ejecuta la transcripción desde este módulo.</p>
               </div>
 
               <!-- Formulario principal de transcripcion -->
@@ -94,7 +114,7 @@
                     placeholder="https://www.youtube.com/watch?v=..."
                     autocomplete="off"
                   />
-                  <small>Pega un enlace publico cuando uses modo URL.</small>
+                  <small>Pega un enlace público cuando uses modo URL.</small>
                 </div>
 
                 <!-- Grupo archivo -->
@@ -115,10 +135,10 @@
                     <label for="languageSelect">Idioma</label>
                     <select id="languageSelect" name="language">
                       <option value="auto" selected>auto</option>
-                      <option value="es">es (Espanol)</option>
-                      <option value="en">en (Ingles)</option>
-                      <option value="pt">pt (Portugues)</option>
-                      <option value="other">Otro codigo...</option>
+                      <option value="es">es (Español)</option>
+                      <option value="en">en (Inglés)</option>
+                      <option value="pt">pt (Portugués)</option>
+                      <option value="other">Otro código...</option>
                     </select>
                     <!-- Input extra para idioma personalizado -->
                     <input
@@ -164,7 +184,7 @@
                     maxlength="120"
                     autocomplete="off"
                   />
-                  <small>Si lo dejas vacio, se usa un nombre automatico con fecha.</small>
+                  <small>Si lo dejas vacío, se usa un nombre automático con fecha.</small>
                 </div>
 
                 <!-- Vista rapida del curl equivalente -->
@@ -179,7 +199,14 @@
                     <input type="checkbox" id="mockMode" />
                     <span>Usar modo mock</span>
                   </label>
-                  <p class="hint">Util cuando no tienes acceso a VPN o backend.</p>
+                  <label class="checkbox">
+                    <input type="checkbox" id="saveHistory" checked />
+                    <span>Guardar historial local</span>
+                  </label>
+                  <p class="hint">
+                    Útil cuando no tienes acceso a VPN o backend. El historial queda sólo en este
+                    navegador.
+                  </p>
                 </div>
 
                 <!-- Estado del formulario -->
@@ -198,8 +225,8 @@
             <!-- Panel 2: historial de resultados + detalle -->
             <article id="resultPanel" class="admin-view" aria-labelledby="resultTitle">
               <div class="view-head">
-                <h2 id="resultTitle">Resultados historicos</h2>
-                <p>Aqui se guardan todos los tipeos realizados y puedes revisar su detalle.</p>
+                <h2 id="resultTitle">Resultados históricos</h2>
+                <p>Aquí se guardan los tipeos realizados y puedes revisar su detalle.</p>
               </div>
 
               <!-- Estado de solicitudes del backend -->
@@ -226,8 +253,27 @@
                     <option value="50">50</option>
                     <option value="100">100</option>
                   </select>
-                  por pagina
+                  por página
                 </label>
+
+                <div class="history-toolbar" aria-label="Acciones del historial">
+                  <button
+                    id="deleteSelectedBtn"
+                    class="btn btn--small btn--ghost"
+                    type="button"
+                    disabled
+                  >
+                    Eliminar seleccionado
+                  </button>
+                  <button
+                    id="clearHistoryBtn"
+                    class="btn btn--small btn--ghost btn--danger"
+                    type="button"
+                    disabled
+                  >
+                    Borrar historial
+                  </button>
+                </div>
               </div>
 
               <!-- Tabla de historial -->
@@ -242,7 +288,7 @@
                       <th>Formato</th>
                       <th>Tipo</th>
                       <th>Resumen</th>
-                      <th>Accion</th>
+                      <th>Acción</th>
                     </tr>
                   </thead>
                   <tbody id="historyTableBody"></tbody>
@@ -250,12 +296,12 @@
 
                 <!-- Mensaje cuando no hay historial -->
                 <p id="historyEmpty" class="history-empty hidden">
-                  Todavia no hay resultados historicos.
+                  Todavía no hay resultados históricos.
                 </p>
               </div>
 
               <!-- Paginacion numerada -->
-              <div id="historyPagination" class="history-pagination" aria-label="Paginacion"></div>
+              <div id="historyPagination" class="history-pagination" aria-label="Paginación"></div>
 
               <!-- Detalle del registro seleccionado -->
               <div class="result-detail">
@@ -276,11 +322,11 @@
                   </div>
                 </div>
 
-                <label for="resultText" class="visually-hidden">Transcripcion</label>
+                <label for="resultText" class="visually-hidden">Transcripción</label>
                 <textarea
                   id="resultText"
                   rows="12"
-                  placeholder="Selecciona un resultado historico para ver el detalle..."
+                  placeholder="Selecciona un resultado histórico para ver el detalle..."
                   readonly
                 ></textarea>
               </div>
@@ -292,21 +338,51 @@
               </p>
             </article>
 
-            <!-- Panel 3: analisis (placeholder temporal) -->
+            <!-- Panel 3: análisis del resultado y configuración activa -->
             <article id="analysisPanel" class="admin-view" aria-labelledby="analysisTitle">
               <div class="view-head">
-                <h2 id="analysisTitle">Analisis</h2>
-                <p>Pagina en construccion.</p>
+                <h2 id="analysisTitle">Análisis</h2>
+                <p>
+                  Métricas del resultado seleccionado y configuración lista para el próximo tipeo.
+                </p>
               </div>
 
-              <p id="analysisText" class="analysis-copy">Pagina en construccion.</p>
+              <div class="analysis-board">
+                <section
+                  class="analysis-block analysis-block--wide"
+                  aria-labelledby="analysisSummaryTitle"
+                >
+                  <h3 id="analysisSummaryTitle">Vista breve</h3>
+                  <p id="analysisText" class="analysis-copy">
+                    Selecciona o genera un resultado para ver su análisis.
+                  </p>
+                </section>
+
+                <section class="analysis-block" aria-labelledby="analysisMetricsTitle">
+                  <h3 id="analysisMetricsTitle">Métricas</h3>
+                  <div id="analysisMetrics" class="metric-grid" aria-live="polite"></div>
+                </section>
+
+                <section class="analysis-block" aria-labelledby="analysisMetaTitle">
+                  <h3 id="analysisMetaTitle">Registro activo</h3>
+                  <dl id="analysisMetaList" class="meta-list"></dl>
+                </section>
+
+                <section
+                  class="analysis-block analysis-block--wide"
+                  aria-labelledby="analysisConfigTitle"
+                >
+                  <h3 id="analysisConfigTitle">Configuración actual</h3>
+                  <ul id="configSummary" class="config-list"></ul>
+                </section>
+              </div>
             </article>
           </div>
         </section>
       </div>
     </main>
 
-    <!-- Configuracion runtime (inyectada por Docker o valor local por defecto) -->
+    <!-- Configuración runtime (inyectada por Docker o valor local por defecto) -->
     <script src="./assets/js/runtime-config.js"></script>
 
     <!-- Logica principal de la aplicacion -->
