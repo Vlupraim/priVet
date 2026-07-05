@@ -32,6 +32,9 @@ const CONFIG = {
   REQUEST_TIMEOUT_MS: 2 * 60 * 60 * 1000,
 };
 
+const IS_FILE_PROTOCOL_LAUNCH =
+  typeof window !== "undefined" && window.location.protocol === "file:";
+
 /**
  * clave de almacenamiento local para mantener el historial
  * de tipeos entre recargas del navegador.
@@ -191,6 +194,24 @@ function setSetupNotice(type, text) {
 
   setupNotice.className = `notice notice--${type}`;
   setupNotice.textContent = text;
+}
+
+function applyFileProtocolGuard() {
+  if (!IS_FILE_PROTOCOL_LAUNCH) return;
+
+  const message =
+    "Abre Privet con Abrir Privet.bat. index.html directo queda bloqueado por CORS.";
+
+  setSetupNotice("error", message);
+
+  if (statusBox) {
+    statusBox.className = "status status--error";
+    statusBox.textContent = message;
+  }
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+  }
 }
 
 /**
@@ -1076,6 +1097,11 @@ async function handleSubmit(event) {
   event.preventDefault();
 
   if (state.isLoading) return;
+  if (IS_FILE_PROTOCOL_LAUNCH) {
+    applyFileProtocolGuard();
+    activatePanel("tipeosPanel");
+    return;
+  }
 
   const validationError = validateForm();
 
@@ -1506,6 +1532,8 @@ function init() {
     statusType: "idle",
     statusText: "Esperando una solicitud...",
   });
+
+  applyFileProtocolGuard();
 }
 
 init();
