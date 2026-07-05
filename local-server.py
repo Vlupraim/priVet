@@ -14,6 +14,8 @@ import re
 import shutil
 import subprocess
 import tempfile
+from email import policy
+from email.parser import BytesParser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, unquote
@@ -186,8 +188,8 @@ class PrivetLocalHandler(SimpleHTTPRequestHandler):
             raise RuntimeError("No se encontro curl.exe en este Windows.")
 
         endpoint = f"{UPSTREAM_BASE_URL}{TRANSCRIPTION_PATH}"
-        content_type = self.headers.get("Content-Type", "application/octet-stream")
         accept = self.headers.get("Accept", "*/*")
+        extracted_paths = []
 
         with tempfile.NamedTemporaryFile(delete=False) as body_file, tempfile.NamedTemporaryFile(
             delete=False
@@ -196,6 +198,10 @@ class PrivetLocalHandler(SimpleHTTPRequestHandler):
             header_path = Path(header_file.name)
 
         try:
+            curl_form_args, extracted_paths = self._build_curl_form_args(payload_path)
+            if not curl_form_args:
+                curl_form_args = self._build_curl_raw_args(payload_path)
+
             command = [
                 curl_path,
                 "--silent",
@@ -206,15 +212,12 @@ class PrivetLocalHandler(SimpleHTTPRequestHandler):
                 "POST",
                 endpoint,
                 "--header",
-                f"Content-Type: {content_type}",
-                "--header",
                 f"Accept: {accept}",
                 "--header",
                 "Expect:",
                 "--header",
                 "User-Agent: PrivetLocalProxy/1.0",
-                "--data-binary",
-                f"@{payload_path}",
+                *curl_form_args,
                 "--dump-header",
                 str(header_path),
                 "--output",
@@ -250,6 +253,62 @@ class PrivetLocalHandler(SimpleHTTPRequestHandler):
         finally:
             body_path.unlink(missing_ok=True)
             header_path.unlink(missing_ok=True)
+            for extracted_path in extracted_paths:
+                extracted_path.unlink(missing_ok=True)
+
+    def _build_curl_raw_args(self, payload_path: Path):
+        content_type = self.headers.get("Content-Type", "application/octet-stream")
+        return [
+            "--header",
+            f"Content-Type: {content_type}",
+            "--data-binary",
+            f"@{payload_path}",
+        ]
+
+    def _build_curl_form_args(self, payload_path: Path):
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type.lower():
+            return [], []
+
+        raw_payload = payload_path.read_bytes()
+        mime_payload = (
+            f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8")
+            + raw_payload
+        )
+        message = BytesParser(policy=policy.default).parsebytes(mime_payload)
+
+        if not message.is_multipart():
+            return [], []
+
+        args = []
+        extracted_paths = []
+
+        for part in message.iter_parts():
+            field_name = part.get_param("name", header="content-disposition")
+            if not field_name:
+                continue
+
+            data = part.get_payload(decode=True) or b""
+            filename = part.get_filename()
+
+            if filename:
+                suffix = Path(filename).suffix or ".upload"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as file_part:
+                    file_part.write(data)
+                    extracted_path = Path(file_part.name)
+
+                extracted_paths.append(extracted_path)
+                args.extend(["--form", f"{field_name}=@{extracted_path};filename={filename}"])
+                continue
+
+            charset = part.get_content_charset() or "utf-8"
+            value = data.decode(charset, errors="replace")
+            args.extend(["--form", f"{field_name}={value}"])
+
+        if args:
+            print("Reenviando al backend con curl -F reconstruido.", flush=True)
+
+        return args, extracted_paths
 
     @staticmethod
     def _parse_curl_headers(raw_headers):
