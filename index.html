@@ -96,12 +96,12 @@
                 <fieldset class="mode-selector" aria-label="Modo de entrada">
                   <legend>Fuente del audio</legend>
                   <label class="mode-pill">
-                    <input type="radio" name="inputMode" value="url" checked />
-                    <span>Usar URL</span>
+                    <input type="radio" name="inputMode" value="file" checked />
+                    <span>Subir archivos</span>
                   </label>
                   <label class="mode-pill">
-                    <input type="radio" name="inputMode" value="file" />
-                    <span>Subir archivo</span>
+                    <input type="radio" name="inputMode" value="url" />
+                    <span>Usar URL</span>
                   </label>
                 </fieldset>
 
@@ -119,14 +119,26 @@
                 </div>
 
                 <!-- Grupo archivo -->
-                <div class="field-group hidden" id="fileGroup">
-                  <label for="fileInput">Archivo de audio o video</label>
+                <div class="field-group" id="fileGroup">
+                  <label for="fileInput">Archivos de audio o video</label>
+                  <div id="fileDropZone" class="file-dropzone" tabindex="0" role="button">
+                    <div class="file-dropzone__copy">
+                      <strong>Arrastra clases aquí</strong>
+                      <span>o elige uno o varios videos/audios desde el computador.</span>
+                    </div>
+                    <button id="filePickBtn" class="btn btn--ghost btn--file" type="button">
+                      Elegir archivos
+                    </button>
+                  </div>
                   <input
                     id="fileInput"
+                    class="visually-hidden"
                     name="file"
                     type="file"
+                    multiple
                     accept="audio/*,video/*,.mp3,.wav,.m4a,.flac,.ogg,.webm,.mp4,.mov,.mkv"
                   />
+                  <ul id="fileList" class="file-list" aria-live="polite"></ul>
                   <small>Formatos comunes: mp3, wav, m4a, flac, ogg, webm, mp4.</small>
                 </div>
 

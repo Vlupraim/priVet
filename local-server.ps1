@@ -1,6 +1,7 @@
 param(
   [int]$Port = $(if ($env:PRIVET_PORT) { [int]$env:PRIVET_PORT } else { 8787 }),
-  [string]$UpstreamBaseUrl = $(if ($env:PRIVET_API_BASE_URL) { $env:PRIVET_API_BASE_URL } else { "https://whisper-skynet.bourbaki-lab.duckdns.org" })
+  [string]$UpstreamBaseUrl = $(if ($env:PRIVET_API_BASE_URL) { $env:PRIVET_API_BASE_URL } else { "https://whisper-skynet.bourbaki-lab.duckdns.org" }),
+  [string]$OutputDir = $(if ($env:PRIVET_OUTPUT_DIR) { $env:PRIVET_OUTPUT_DIR } else { "C:\Users\kuqui\OneDrive\Escritorio\alejandria" })
 )
 
 $ErrorActionPreference = "Stop"
@@ -84,7 +85,8 @@ function Write-TextResponse {
 function Write-RuntimeConfig {
   param([System.Net.Sockets.NetworkStream]$Stream)
 
-  $bodyText = "window.APP_CONFIG = Object.freeze({`n  API_BASE_URL: window.location.origin,`n});`n"
+  $outputDirJson = ConvertTo-Json -Compress $OutputDir
+  $bodyText = "window.APP_CONFIG = Object.freeze({`n  API_BASE_URL: window.location.origin,`n  LOCAL_OUTPUT_DIR: $outputDirJson,`n});`n"
   $body = [System.Text.Encoding]::UTF8.GetBytes($bodyText)
   Write-RawResponse -Stream $Stream -StatusCode 200 -Reason "OK" -Headers @{
     "Content-Type" = "application/javascript; charset=utf-8"
@@ -175,6 +177,87 @@ function Read-Request {
   }
 }
 
+function Get-OutputFileName {
+  param([hashtable]$Headers)
+
+  if ($Headers.ContainsKey("x-privet-output-filename") -and $Headers["x-privet-output-filename"]) {
+    return [Uri]::UnescapeDataString($Headers["x-privet-output-filename"]).Trim()
+  }
+
+  return "transcripcion.txt"
+}
+
+function Get-SafeOutputFileName {
+  param([string]$FileName)
+
+  $leaf = [System.IO.Path]::GetFileName($(if ($FileName) { $FileName } else { "transcripcion.txt" }))
+  if (-not $leaf.ToLowerInvariant().EndsWith(".txt")) {
+    $leaf = "$leaf.txt"
+  }
+
+  $stem = [System.IO.Path]::GetFileNameWithoutExtension($leaf)
+  $stem = [regex]::Replace($stem, '[\\/:*?"<>|]+', "-")
+  $stem = [regex]::Replace($stem, "\s+", "-").Trim(".-")
+  if ($stem.Length -gt 120) {
+    $stem = $stem.Substring(0, 120)
+  }
+  if (-not $stem) {
+    $stem = "transcripcion"
+  }
+
+  return "$stem.txt"
+}
+
+function ConvertTo-TranscriptionText {
+  param([byte[]]$Body)
+
+  $text = [System.Text.Encoding]::UTF8.GetString($Body)
+
+  try {
+    $parsed = $text | ConvertFrom-Json -ErrorAction Stop
+    if ($parsed -is [string]) {
+      return $parsed
+    }
+
+    foreach ($name in @("text", "transcription", "transcript", "result", "output")) {
+      if ($parsed.PSObject.Properties.Name -contains $name) {
+        $value = [string]$parsed.$name
+        if ($value.Trim()) {
+          return $value
+        }
+      }
+    }
+  }
+  catch {
+    return $text
+  }
+
+  return $text
+}
+
+function Save-Transcription {
+  param(
+    [byte[]]$Body,
+    [string]$OutputFileName
+  )
+
+  New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
+
+  $safeName = Get-SafeOutputFileName -FileName $OutputFileName
+  $candidate = Join-Path $OutputDir $safeName
+  $counter = 2
+
+  while (Test-Path -LiteralPath $candidate) {
+    $stem = [System.IO.Path]::GetFileNameWithoutExtension($safeName)
+    $candidate = Join-Path $OutputDir "$stem-$counter.txt"
+    $counter += 1
+  }
+
+  $text = ConvertTo-TranscriptionText -Body $Body
+  [System.IO.File]::WriteAllText($candidate, $text, [System.Text.Encoding]::UTF8)
+  return $candidate
+}
+
 function Proxy-Transcription {
   param(
     [System.Net.Sockets.NetworkStream]$Stream,
@@ -228,11 +311,23 @@ function Proxy-Transcription {
 
     $response = $client.SendAsync($message).Result
     $body = $response.Content.ReadAsByteArrayAsync().Result
+    $savedPath = ""
+    $saveError = ""
+
+    if ([int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 300) {
+      try {
+        $savedPath = Save-Transcription -Body $body -OutputFileName (Get-OutputFileName -Headers $Request.Headers)
+      }
+      catch {
+        $saveError = [string]$_
+      }
+    }
 
     $headers = @{
       "Access-Control-Allow-Origin" = "*"
       "Access-Control-Allow-Methods" = "POST, OPTIONS"
       "Access-Control-Allow-Headers" = "Content-Type"
+      "X-Privet-Output-Dir" = [Uri]::EscapeDataString($OutputDir)
     }
 
     foreach ($header in $response.Headers.GetEnumerator()) {
@@ -245,6 +340,12 @@ function Proxy-Transcription {
     }
 
     $headers["Content-Length"] = [string]$body.Length
+    if ($savedPath) {
+      $headers["X-Privet-Saved-Path"] = [Uri]::EscapeDataString($savedPath)
+    }
+    if ($saveError) {
+      $headers["X-Privet-Save-Error"] = [Uri]::EscapeDataString($saveError)
+    }
     Write-RawResponse -Stream $Stream -StatusCode ([int]$response.StatusCode) -Reason $response.ReasonPhrase -Headers $headers -Body $body
   }
   catch {
@@ -305,6 +406,7 @@ $listener.Start()
 
 Write-Host "Privet local: http://127.0.0.1:$Port/"
 Write-Host "Backend proxy: $UpstreamBaseUrl$TranscriptionPath"
+Write-Host "Carpeta de salida: $OutputDir"
 Write-Host "Deja esta ventana abierta mientras uses la pagina."
 
 try {

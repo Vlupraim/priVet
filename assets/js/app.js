@@ -24,6 +24,10 @@ function resolveApiBaseUrl() {
 
 const CONFIG = {
   API_BASE_URL: resolveApiBaseUrl(),
+  LOCAL_OUTPUT_DIR:
+    typeof window !== "undefined" && window.APP_CONFIG
+      ? window.APP_CONFIG.LOCAL_OUTPUT_DIR || ""
+      : "",
   TRANSCRIBE_PATH: "/audio/transcription/",
   REQUEST_TIMEOUT_MS: 8 * 60 * 1000,
 };
@@ -58,6 +62,7 @@ const state = {
   activePanel: "tipeosPanel",
   history: [],
   selectedHistoryId: null,
+  selectedFiles: [],
   pageSize: 10,
   currentPage: 1,
 };
@@ -77,6 +82,9 @@ const urlGroup = document.getElementById("urlGroup");
 const fileGroup = document.getElementById("fileGroup");
 const urlInput = document.getElementById("urlInput");
 const fileInput = document.getElementById("fileInput");
+const fileDropZone = document.getElementById("fileDropZone");
+const filePickBtn = document.getElementById("filePickBtn");
+const fileList = document.getElementById("fileList");
 const languageSelect = document.getElementById("languageSelect");
 const customLanguageInput = document.getElementById("customLanguage");
 const formatGroup = document.getElementById("formatGroup");
@@ -193,6 +201,60 @@ function getInputMode() {
   return selected ? selected.value : "url";
 }
 
+function formatFileSize(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function updateFileList() {
+  if (!fileList) return;
+
+  fileList.innerHTML = "";
+
+  state.selectedFiles.forEach((file) => {
+    const item = document.createElement("li");
+    const name = document.createElement("span");
+    const size = document.createElement("small");
+
+    name.textContent = file.name;
+    size.textContent = formatFileSize(file.size);
+
+    item.appendChild(name);
+    item.appendChild(size);
+    fileList.appendChild(item);
+  });
+}
+
+function setSelectedFiles(files) {
+  state.selectedFiles = Array.from(files || []).filter((file) => file instanceof File);
+  updateFileList();
+  syncConfigSummary();
+  syncCurlPreview();
+}
+
+function clearSelectedFiles() {
+  state.selectedFiles = [];
+  if (fileInput) {
+    fileInput.value = "";
+  }
+  updateFileList();
+}
+
+function setInputMode(mode) {
+  const radio = document.querySelector(`input[name="inputMode"][value="${mode}"]`);
+  if (radio instanceof HTMLInputElement) {
+    radio.checked = true;
+  }
+
+  syncInputModeUI();
+  syncConfigSummary();
+  syncCurlPreview();
+  syncAnalysisPreview();
+}
+
 /**
  * muestra url o archivo segun el modo seleccionado.
  * ademas limpia el campo contrario para cumplir "url o archivo, nunca ambos".
@@ -204,7 +266,7 @@ function syncInputModeUI() {
   fileGroup.classList.toggle("hidden", urlMode);
 
   if (urlMode) {
-    fileInput.value = "";
+    clearSelectedFiles();
   } else {
     urlInput.value = "";
   }
@@ -247,18 +309,32 @@ function sanitizeOutputBaseName(value) {
     .slice(0, 120);
 }
 
+function getFileBaseName(file) {
+  if (!file?.name) return "";
+  return sanitizeOutputBaseName(file.name.replace(/\.[^.]+$/, ""));
+}
+
 /**
  * devuelve el nombre de salida final (siempre con extension .txt).
  * - forpreview: evita timestamp variable para mostrar un ejemplo estable.
  */
-function resolveOutputFileName({ forPreview = false } = {}) {
+function resolveOutputFileName({ forPreview = false, sourceFile = null, index = 0, total = 1 } = {}) {
   const baseFromInput = sanitizeOutputBaseName(outputNameInput?.value || "");
   if (baseFromInput) {
+    if (total > 1 && sourceFile) {
+      const fileBase = getFileBaseName(sourceFile) || `archivo-${index + 1}`;
+      return `${baseFromInput}-${fileBase}.txt`;
+    }
+
     return `${baseFromInput}.txt`;
   }
 
   if (forPreview) {
-    return "transcripcion-salida.txt";
+    return sourceFile ? `${getFileBaseName(sourceFile) || "archivo"}.txt` : "transcripcion-salida.txt";
+  }
+
+  if (sourceFile) {
+    return `${getFileBaseName(sourceFile) || `archivo-${index + 1}`}.txt`;
   }
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -272,14 +348,16 @@ function buildCurlPreviewCommand() {
   const endpoint = `${CONFIG.API_BASE_URL}${CONFIG.TRANSCRIBE_PATH}`;
   const language = resolveLanguageValue() || "es";
   const format = formatSelect.value || "diarized";
-  const outputFileName = resolveOutputFileName({ forPreview: true });
+  const previewFile = getInputMode() === "file" ? state.selectedFiles[0] : null;
+  const outputFileName = resolveOutputFileName({ forPreview: true, sourceFile: previewFile });
 
   if (getInputMode() === "url") {
     const sourceUrl = urlInput.value.trim() || "https://www.youtube.com/watch?v=NHKIBoJkAMM";
     return `curl -X POST "${endpoint}" -F "url=${sourceUrl}" -F "language=${language}" -F "format=${format}" >${outputFileName}`;
   }
 
-  return `curl -X POST "${endpoint}" -F "file=@<audio-o-video.mp4>" -F "language=${language}" -F "format=${format}" >${outputFileName}`;
+  const sourceFile = state.selectedFiles[0]?.name || "<audio-o-video.mp4>";
+  return `curl -X POST "${endpoint}" -F "file=@${sourceFile}" -F "language=${language}" -F "format=${format}" >${outputFileName}`;
 }
 
 /**
@@ -334,7 +412,15 @@ function getSourceSummary() {
     return urlInput.value.trim() || "Sin URL cargada";
   }
 
-  return fileInput.files?.[0]?.name || "Sin archivo cargado";
+  if (state.selectedFiles.length === 0) {
+    return "Sin archivos cargados";
+  }
+
+  if (state.selectedFiles.length === 1) {
+    return state.selectedFiles[0].name;
+  }
+
+  return `${state.selectedFiles.length} archivos cargados`;
 }
 
 /**
@@ -352,6 +438,7 @@ function syncConfigSummary() {
     `Idioma: ${language}`,
     `Formato: ${formatSelect.value}`,
     `Salida txt: ${resolveOutputFileName({ forPreview: true })}`,
+    `Carpeta local: ${CONFIG.LOCAL_OUTPUT_DIR || "segun servidor local"}`,
     `Modo mock: ${mockModeCheckbox.checked ? "Activado" : "Desactivado"}`,
     `Historial local: ${saveHistoryCheckbox?.checked ? "Activado" : "Desactivado"}`,
   ];
@@ -528,6 +615,7 @@ function loadHistoryFromStorage() {
         format: item.format === "diarized" ? "diarized" : "flat",
         executionType: item.executionType === "mock" ? "mock" : "real",
         outputFileName: String(item.outputFileName || ""),
+        savedPath: String(item.savedPath || ""),
         text: String(item.text || ""),
         preview: String(item.preview || buildPreview(String(item.text || ""))),
         persisted: item.persisted === false ? false : true,
@@ -540,10 +628,11 @@ function loadHistoryFromStorage() {
 /**
  * crea un nuevo registro historico al completar una transcripcion.
  */
-function createHistoryEntry(transcriptionText, outputFileName) {
+function createHistoryEntry(transcriptionText, outputFileName, options = {}) {
   const mode = getInputMode();
   const sourceLabel =
-    mode === "url" ? urlInput.value.trim() : fileInput.files?.[0]?.name || "archivo";
+    options.sourceLabel ||
+    (mode === "url" ? urlInput.value.trim() : state.selectedFiles[0]?.name || "archivo");
 
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -554,6 +643,7 @@ function createHistoryEntry(transcriptionText, outputFileName) {
     format: formatSelect.value,
     executionType: mockModeCheckbox.checked ? "mock" : "real",
     outputFileName: outputFileName || resolveOutputFileName(),
+    savedPath: options.savedPath || "",
     text: transcriptionText,
     preview: buildPreview(transcriptionText),
     persisted: saveHistoryCheckbox?.checked !== false,
@@ -783,8 +873,8 @@ function validateForm() {
     } catch {
       return "La URL no tiene un formato válido.";
     }
-  } else if (!fileInput.files || fileInput.files.length === 0) {
-    return "Debes seleccionar un archivo de audio.";
+  } else if (state.selectedFiles.length === 0) {
+    return "Debes seleccionar o arrastrar al menos un archivo de audio o video.";
   }
 
   if (!language) {
@@ -805,14 +895,14 @@ function validateForm() {
 /**
  * crea el formdata respetando el contrato de la api.
  */
-function buildPayload(outputFileName) {
+function buildPayload(outputFileName, sourceFile = null) {
   const formData = new FormData();
   const mode = getInputMode();
 
   if (mode === "url") {
     formData.append("url", urlInput.value.trim());
   } else {
-    formData.append("file", fileInput.files[0]);
+    formData.append("file", sourceFile || state.selectedFiles[0]);
   }
 
   formData.append("language", resolveLanguageValue());
@@ -909,19 +999,44 @@ function normalizeTranscriptionResponse(responseText) {
   return rawText;
 }
 
+function decodeResponseHeader(value) {
+  if (!value) return "";
+
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function shouldSendLocalSaveHeaders() {
+  return (
+    typeof window !== "undefined" &&
+    CONFIG.API_BASE_URL === window.location.origin &&
+    !mockModeCheckbox.checked
+  );
+}
+
 /**
  * solicitud real al backend con timeout para evitar bloqueos largos.
  */
-async function realTranscriptionRequest(formData) {
+async function realTranscriptionRequest(formData, outputFileName) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CONFIG.REQUEST_TIMEOUT_MS);
+  const requestOptions = {
+    method: "POST",
+    body: formData,
+    signal: controller.signal,
+  };
+
+  if (shouldSendLocalSaveHeaders()) {
+    requestOptions.headers = {
+      "X-Privet-Output-Filename": encodeURIComponent(outputFileName || "transcripcion.txt"),
+    };
+  }
 
   try {
-    const response = await fetch(`${CONFIG.API_BASE_URL}${CONFIG.TRANSCRIBE_PATH}`, {
-      method: "POST",
-      body: formData,
-      signal: controller.signal,
-    });
+    const response = await fetch(`${CONFIG.API_BASE_URL}${CONFIG.TRANSCRIBE_PATH}`, requestOptions);
 
     if (!response.ok) {
       const possibleError = await response.text().catch(() => "");
@@ -931,7 +1046,11 @@ async function realTranscriptionRequest(formData) {
     }
 
     const responseText = await response.text();
-    return normalizeTranscriptionResponse(responseText);
+    return {
+      text: normalizeTranscriptionResponse(responseText),
+      savedPath: decodeResponseHeader(response.headers.get("X-Privet-Saved-Path")),
+      saveError: decodeResponseHeader(response.headers.get("X-Privet-Save-Error")),
+    };
   } catch (error) {
     if (error.name === "AbortError") {
       throw new Error("La solicitud excedió el tiempo máximo de espera.");
@@ -972,31 +1091,69 @@ async function handleSubmit(event) {
     statusText: "Enviando solicitud...",
   });
 
-  const outputFileName = resolveOutputFileName();
-  const payload = buildPayload(outputFileName);
+  const mode = getInputMode();
+  const jobs = mode === "file" ? state.selectedFiles : [null];
+  const useMock = mockModeCheckbox.checked;
+  const savedPaths = [];
+  const saveErrors = [];
+  let completedCount = 0;
 
   try {
-    const useMock = mockModeCheckbox.checked;
-    const result = useMock
-      ? await mockTranscriptionRequest(payload)
-      : await realTranscriptionRequest(payload);
+    for (const [index, sourceFile] of jobs.entries()) {
+      const outputFileName = resolveOutputFileName({
+        sourceFile,
+        index,
+        total: jobs.length,
+      });
+      const sourceLabel = sourceFile?.name || urlInput.value.trim();
+      const payload = buildPayload(outputFileName, sourceFile);
 
-    const historyEntry = createHistoryEntry(result || "", outputFileName);
-    addHistoryEntry(historyEntry);
+      setResultStatus({
+        loading: true,
+        statusType: "loading",
+        statusText:
+          jobs.length > 1
+            ? `Transcribiendo ${index + 1}/${jobs.length}: ${sourceLabel}`
+            : `Transcribiendo: ${sourceLabel}`,
+      });
 
-    setSetupNotice(
-      "ok",
-      useMock
-        ? "Transcripción mock generada correctamente."
-        : "Transcripción recibida correctamente."
-    );
+      const responseResult = useMock
+        ? { text: await mockTranscriptionRequest(payload), savedPath: "", saveError: "" }
+        : await realTranscriptionRequest(payload, outputFileName);
+      const resultTextValue = responseResult.text || "";
+
+      if (responseResult.savedPath) {
+        savedPaths.push(responseResult.savedPath);
+      }
+      if (responseResult.saveError) {
+        saveErrors.push(responseResult.saveError);
+      }
+
+      const historyEntry = createHistoryEntry(resultTextValue, outputFileName, {
+        sourceLabel,
+        savedPath: responseResult.savedPath,
+      });
+      addHistoryEntry(historyEntry);
+      completedCount += 1;
+    }
+
+    const savedMessage =
+      savedPaths.length > 0
+        ? ` Guardado en: ${savedPaths.length === 1 ? savedPaths[0] : CONFIG.LOCAL_OUTPUT_DIR}.`
+        : "";
+    const saveWarning =
+      saveErrors.length > 0 ? ` No se pudo guardar localmente: ${saveErrors[0]}` : "";
+    const transcriptionLabel = completedCount === 1 ? "transcripción lista" : "transcripciones listas";
+    const okMessage = useMock
+      ? "Transcripción mock generada correctamente."
+      : `${completedCount} ${transcriptionLabel}.${savedMessage}${saveWarning}`;
+
+    setSetupNotice("ok", okMessage);
 
     setResultStatus({
       loading: false,
       statusType: "ok",
-      statusText: useMock
-        ? "Transcripción mock generada correctamente."
-        : "Transcripción recibida correctamente.",
+      statusText: okMessage,
     });
 
     activatePanel("resultPanel");
@@ -1021,6 +1178,7 @@ async function handleSubmit(event) {
  */
 function handleClear() {
   form.reset();
+  clearSelectedFiles();
   syncInputModeUI();
   syncCustomLanguageUI();
   syncFormatHelp();
@@ -1224,9 +1382,52 @@ function bindEvents() {
   });
 
   fileInput.addEventListener("change", () => {
-    syncConfigSummary();
-    syncCurlPreview();
+    setSelectedFiles(fileInput.files);
   });
+
+  if (filePickBtn) {
+    filePickBtn.addEventListener("click", () => {
+      setInputMode("file");
+      fileInput.click();
+    });
+  }
+
+  if (fileDropZone) {
+    fileDropZone.addEventListener("click", (event) => {
+      if (event.target === filePickBtn) return;
+      setInputMode("file");
+      fileInput.click();
+    });
+
+    fileDropZone.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      setInputMode("file");
+      fileInput.click();
+    });
+
+    ["dragenter", "dragover"].forEach((eventName) => {
+      fileDropZone.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        fileDropZone.classList.add("is-dragover");
+      });
+    });
+
+    ["dragleave", "drop"].forEach((eventName) => {
+      fileDropZone.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        fileDropZone.classList.remove("is-dragover");
+      });
+    });
+
+    fileDropZone.addEventListener("drop", (event) => {
+      const droppedFiles = event.dataTransfer?.files;
+      if (!droppedFiles || droppedFiles.length === 0) return;
+
+      setInputMode("file");
+      setSelectedFiles(droppedFiles);
+    });
+  }
 
   if (outputNameInput) {
     outputNameInput.addEventListener("input", () => {
