@@ -86,7 +86,8 @@ function Write-RuntimeConfig {
   param([System.Net.Sockets.NetworkStream]$Stream)
 
   $outputDirJson = ConvertTo-Json -Compress $OutputDir
-  $bodyText = "window.APP_CONFIG = Object.freeze({`n  API_BASE_URL: window.location.origin,`n  LOCAL_OUTPUT_DIR: $outputDirJson,`n});`n"
+  $backendApiJson = ConvertTo-Json -Compress $UpstreamBaseUrl
+  $bodyText = "window.APP_CONFIG = Object.freeze({`n  API_BASE_URL: window.location.origin,`n  BACKEND_API_BASE_URL: $backendApiJson,`n  LOCAL_OUTPUT_DIR: $outputDirJson,`n});`n"
   $body = [System.Text.Encoding]::UTF8.GetBytes($bodyText)
   Write-RawResponse -Stream $Stream -StatusCode 200 -Reason "OK" -Headers @{
     "Content-Type" = "application/javascript; charset=utf-8"

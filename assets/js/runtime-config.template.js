@@ -3,4 +3,5 @@
  */
 window.APP_CONFIG = Object.freeze({
   API_BASE_URL: "${API_BASE_URL}",
+  BACKEND_API_BASE_URL: "${API_BASE_URL}",
 });

@@ -22,8 +22,23 @@ function resolveApiBaseUrl() {
   return normalized || DEFAULT_API_BASE_URL;
 }
 
+function resolveBackendApiBaseUrl() {
+  const runtimeValue =
+    typeof window !== "undefined" && window.APP_CONFIG
+      ? window.APP_CONFIG.BACKEND_API_BASE_URL
+      : undefined;
+
+  if (typeof runtimeValue !== "string") {
+    return DEFAULT_API_BASE_URL;
+  }
+
+  const normalized = runtimeValue.trim().replace(/\/+$/, "");
+  return normalized || DEFAULT_API_BASE_URL;
+}
+
 const CONFIG = {
   API_BASE_URL: resolveApiBaseUrl(),
+  BACKEND_API_BASE_URL: resolveBackendApiBaseUrl(),
   LOCAL_OUTPUT_DIR:
     typeof window !== "undefined" && window.APP_CONFIG
       ? window.APP_CONFIG.LOCAL_OUTPUT_DIR || ""
@@ -128,7 +143,12 @@ let formatHelpHideTimer = null;
 let panelSwitchTimer = null;
 
 if (endpointPreview) {
-  endpointPreview.textContent = `${CONFIG.API_BASE_URL}${CONFIG.TRANSCRIBE_PATH}`;
+  const localEndpoint = `${CONFIG.API_BASE_URL}${CONFIG.TRANSCRIBE_PATH}`;
+  const backendEndpoint = `${CONFIG.BACKEND_API_BASE_URL}${CONFIG.TRANSCRIBE_PATH}`;
+  endpointPreview.textContent =
+    localEndpoint === backendEndpoint
+      ? backendEndpoint
+      : `Navegador -> ${localEndpoint} | curl.exe -> ${backendEndpoint}`;
 }
 
 /**
@@ -366,7 +386,7 @@ function resolveOutputFileName({ forPreview = false, sourceFile = null, index = 
  * genera un comando curl de referencia con la estructura usada por el backend.
  */
 function buildCurlPreviewCommand() {
-  const endpoint = `${CONFIG.API_BASE_URL}${CONFIG.TRANSCRIBE_PATH}`;
+  const endpoint = `${CONFIG.BACKEND_API_BASE_URL}${CONFIG.TRANSCRIBE_PATH}`;
   const language = resolveLanguageValue() || "es";
   const previewFile = getInputMode() === "file" ? state.selectedFiles[0] : null;
   const outputFileName = resolveOutputFileName({ forPreview: true, sourceFile: previewFile });

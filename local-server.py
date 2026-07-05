@@ -74,6 +74,7 @@ class PrivetLocalHandler(SimpleHTTPRequestHandler):
         body = (
             "window.APP_CONFIG = Object.freeze({\n"
             "  API_BASE_URL: window.location.origin,\n"
+            f"  BACKEND_API_BASE_URL: {json.dumps(UPSTREAM_BASE_URL)},\n"
             f"  LOCAL_OUTPUT_DIR: {json.dumps(str(OUTPUT_DIR))},\n"
             "});\n"
         ).encode("utf-8")
