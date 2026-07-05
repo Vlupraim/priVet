@@ -1,0 +1,35 @@
+PRIVET - USO LOCAL
+===================
+
+1. Deja esta carpeta en el computador:
+
+   Documents\repo\priVet
+
+2. Haz doble clic en:
+
+   Abrir Privet.bat
+
+3. Se abrira una ventana negra y despues la pagina en el navegador:
+
+   http://127.0.0.1:8787/
+
+4. Importante:
+
+   No cierres la ventana negra mientras estes usando la pagina.
+   Esa ventana mantiene viva la conexion local que reemplaza al curl.
+
+5. En la pagina:
+
+   - Selecciona "Subir archivo".
+   - Elige el video o audio de la clase, por ejemplo un .mp4.
+   - En idioma elige "es".
+   - Presiona "Transcribir".
+   - Cuando termine, copia o descarga el resultado como .txt.
+
+6. Para apagarlo:
+
+   Cierra la ventana negra o presiona Ctrl+C.
+
+Nota:
+Abrir index.html directamente puede mostrar la interfaz, pero el navegador puede
+bloquear la transcripcion por CORS. Por eso se usa "Abrir Privet.bat".

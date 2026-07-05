@@ -279,7 +279,7 @@ function buildCurlPreviewCommand() {
     return `curl -X POST "${endpoint}" -F "url=${sourceUrl}" -F "language=${language}" -F "format=${format}" >${outputFileName}`;
   }
 
-  return `curl -X POST "${endpoint}" -F "file=@<audio.mp3>" -F "language=${language}" -F "format=${format}" >${outputFileName}`;
+  return `curl -X POST "${endpoint}" -F "file=@<audio-o-video.mp4>" -F "language=${language}" -F "format=${format}" >${outputFileName}`;
 }
 
 /**
