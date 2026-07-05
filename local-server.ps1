@@ -425,6 +425,13 @@ function Proxy-Transcription {
         $saveError = [string]$_
       }
     }
+    elseif ([int]$response.StatusCode -ge 400) {
+      $detail = [System.Text.Encoding]::UTF8.GetString($body).Trim()
+      if (-not $detail) {
+        $detail = "sin detalle"
+      }
+      Write-Host "Backend respondio HTTP $($response.StatusCode): $($detail.Substring(0, [Math]::Min(500, $detail.Length)))"
+    }
 
     $headers = @{
       "Access-Control-Allow-Origin" = "*"
@@ -449,6 +456,7 @@ function Proxy-Transcription {
     Write-RawResponse -Stream $Stream -StatusCode ([int]$response.StatusCode) -Reason $response.Reason -Headers $headers -Body $body
   }
   catch {
+    Write-Host "Error conectando con backend: $_"
     Write-TextResponse -Stream $Stream -StatusCode 502 -Reason "Bad Gateway" -Text "No se pudo conectar con el backend: $_"
   }
   finally {

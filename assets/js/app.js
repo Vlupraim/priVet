@@ -347,17 +347,16 @@ function resolveOutputFileName({ forPreview = false, sourceFile = null, index = 
 function buildCurlPreviewCommand() {
   const endpoint = `${CONFIG.API_BASE_URL}${CONFIG.TRANSCRIBE_PATH}`;
   const language = resolveLanguageValue() || "es";
-  const format = formatSelect.value || "diarized";
   const previewFile = getInputMode() === "file" ? state.selectedFiles[0] : null;
   const outputFileName = resolveOutputFileName({ forPreview: true, sourceFile: previewFile });
 
   if (getInputMode() === "url") {
     const sourceUrl = urlInput.value.trim() || "https://www.youtube.com/watch?v=NHKIBoJkAMM";
-    return `curl -X POST "${endpoint}" -F "url=${sourceUrl}" -F "language=${language}" -F "format=${format}" >${outputFileName}`;
+    return `curl -X POST "${endpoint}" -F "url=${sourceUrl}" -F "language=${language}" >${outputFileName}`;
   }
 
   const sourceFile = state.selectedFiles[0]?.name || "<audio-o-video.mp4>";
-  return `curl -X POST "${endpoint}" -F "file=@${sourceFile}" -F "language=${language}" -F "format=${format}" >${outputFileName}`;
+  return `curl -X POST "${endpoint}" -F "file=@${sourceFile}" -F "language=${language}" >${outputFileName}`;
 }
 
 /**
@@ -895,7 +894,7 @@ function validateForm() {
 /**
  * crea el formdata respetando el contrato de la api.
  */
-function buildPayload(outputFileName, sourceFile = null) {
+function buildPayload(outputFileName, sourceFile = null, { includeBackendExtras = false } = {}) {
   const formData = new FormData();
   const mode = getInputMode();
 
@@ -906,8 +905,11 @@ function buildPayload(outputFileName, sourceFile = null) {
   }
 
   formData.append("language", resolveLanguageValue());
-  formData.append("format", formatSelect.value);
-  formData.append("output_filename", outputFileName || resolveOutputFileName());
+
+  if (includeBackendExtras) {
+    formData.append("format", formatSelect.value);
+    formData.append("output_filename", outputFileName || resolveOutputFileName());
+  }
 
   return formData;
 }
@@ -1106,7 +1108,9 @@ async function handleSubmit(event) {
         total: jobs.length,
       });
       const sourceLabel = sourceFile?.name || urlInput.value.trim();
-      const payload = buildPayload(outputFileName, sourceFile);
+      const payload = buildPayload(outputFileName, sourceFile, {
+        includeBackendExtras: useMock,
+      });
 
       setResultStatus({
         loading: true,

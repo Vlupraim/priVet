@@ -136,6 +136,12 @@ class PrivetLocalHandler(SimpleHTTPRequestHandler):
                     saved_path = self._save_transcription(response_body, output_filename)
                 except Exception as exc:
                     save_error = str(exc)
+            elif status >= 400:
+                detail = response_body.decode("utf-8", errors="replace").strip()
+                print(
+                    f"Backend respondio HTTP {status}: {detail[:500] or 'sin detalle'}",
+                    flush=True,
+                )
 
             self.send_response(status, reason)
             self._send_cors_headers()
@@ -165,6 +171,7 @@ class PrivetLocalHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(response_body)
         except Exception as exc:  # pragma: no cover - mensaje operativo
+            print(f"Error conectando con backend: {exc}", flush=True)
             message = f"No se pudo conectar con el backend: {exc}\n".encode("utf-8", errors="replace")
             self.send_response(502)
             self._send_cors_headers()
