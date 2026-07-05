@@ -1,0 +1,318 @@
+param(
+  [int]$Port = $(if ($env:PRIVET_PORT) { [int]$env:PRIVET_PORT } else { 8787 }),
+  [string]$UpstreamBaseUrl = $(if ($env:PRIVET_API_BASE_URL) { $env:PRIVET_API_BASE_URL } else { "https://whisper-skynet.bourbaki-lab.duckdns.org" })
+)
+
+$ErrorActionPreference = "Stop"
+
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$TranscriptionPath = "/audio/transcription/"
+$UpstreamBaseUrl = $UpstreamBaseUrl.TrimEnd("/")
+
+Add-Type -AssemblyName System.Net.Http
+
+function Find-HeaderEnd {
+  param([byte[]]$Bytes, [int]$Length)
+
+  for ($i = 0; $i -le $Length - 4; $i++) {
+    if ($Bytes[$i] -eq 13 -and $Bytes[$i + 1] -eq 10 -and $Bytes[$i + 2] -eq 13 -and $Bytes[$i + 3] -eq 10) {
+      return $i
+    }
+  }
+
+  return -1
+}
+
+function Get-MimeType {
+  param([string]$Path)
+
+  switch ([System.IO.Path]::GetExtension($Path).ToLowerInvariant()) {
+    ".html" { "text/html; charset=utf-8"; break }
+    ".css" { "text/css; charset=utf-8"; break }
+    ".js" { "application/javascript; charset=utf-8"; break }
+    ".png" { "image/png"; break }
+    ".jpg" { "image/jpeg"; break }
+    ".jpeg" { "image/jpeg"; break }
+    ".svg" { "image/svg+xml"; break }
+    ".txt" { "text/plain; charset=utf-8"; break }
+    default { "application/octet-stream"; break }
+  }
+}
+
+function Write-RawResponse {
+  param(
+    [System.Net.Sockets.NetworkStream]$Stream,
+    [int]$StatusCode,
+    [string]$Reason,
+    [hashtable]$Headers,
+    [byte[]]$Body = [byte[]]::new(0)
+  )
+
+  if (-not $Headers.ContainsKey("Content-Length")) {
+    $Headers["Content-Length"] = [string]$Body.Length
+  }
+  $Headers["Connection"] = "close"
+  $Headers["X-Content-Type-Options"] = "nosniff"
+
+  $headerText = "HTTP/1.1 $StatusCode $Reason`r`n"
+  foreach ($key in $Headers.Keys) {
+    $headerText += "$key`: $($Headers[$key])`r`n"
+  }
+  $headerText += "`r`n"
+
+  $headerBytes = [System.Text.Encoding]::ASCII.GetBytes($headerText)
+  $Stream.Write($headerBytes, 0, $headerBytes.Length)
+  if ($Body.Length -gt 0) {
+    $Stream.Write($Body, 0, $Body.Length)
+  }
+}
+
+function Write-TextResponse {
+  param(
+    [System.Net.Sockets.NetworkStream]$Stream,
+    [int]$StatusCode,
+    [string]$Reason,
+    [string]$Text
+  )
+
+  $body = [System.Text.Encoding]::UTF8.GetBytes($Text)
+  Write-RawResponse -Stream $Stream -StatusCode $StatusCode -Reason $Reason -Headers @{
+    "Content-Type" = "text/plain; charset=utf-8"
+  } -Body $body
+}
+
+function Write-RuntimeConfig {
+  param([System.Net.Sockets.NetworkStream]$Stream)
+
+  $bodyText = "window.APP_CONFIG = Object.freeze({`n  API_BASE_URL: window.location.origin,`n});`n"
+  $body = [System.Text.Encoding]::UTF8.GetBytes($bodyText)
+  Write-RawResponse -Stream $Stream -StatusCode 200 -Reason "OK" -Headers @{
+    "Content-Type" = "application/javascript; charset=utf-8"
+    "Cache-Control" = "no-store, no-cache, must-revalidate, max-age=0"
+  } -Body $body
+}
+
+function Write-StaticFile {
+  param(
+    [System.Net.Sockets.NetworkStream]$Stream,
+    [string]$RequestPath
+  )
+
+  if ($RequestPath -eq "/") {
+    $RequestPath = "/index.html"
+  }
+
+  $relative = [Uri]::UnescapeDataString($RequestPath.TrimStart("/")).Replace("/", [System.IO.Path]::DirectorySeparatorChar)
+  $fullPath = [System.IO.Path]::GetFullPath((Join-Path $Root $relative))
+  $rootFull = [System.IO.Path]::GetFullPath($Root)
+
+  if (-not $fullPath.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+    Write-TextResponse -Stream $Stream -StatusCode 403 -Reason "Forbidden" -Text "Ruta no permitida"
+    return
+  }
+
+  if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+    Write-TextResponse -Stream $Stream -StatusCode 404 -Reason "Not Found" -Text "Archivo no encontrado"
+    return
+  }
+
+  $body = [System.IO.File]::ReadAllBytes($fullPath)
+  Write-RawResponse -Stream $Stream -StatusCode 200 -Reason "OK" -Headers @{
+    "Content-Type" = Get-MimeType -Path $fullPath
+  } -Body $body
+}
+
+function Read-Request {
+  param([System.Net.Sockets.NetworkStream]$Stream)
+
+  $buffer = [byte[]]::new(65536)
+  $memory = New-Object System.IO.MemoryStream
+  $headerEnd = -1
+
+  while ($headerEnd -lt 0) {
+    $read = $Stream.Read($buffer, 0, $buffer.Length)
+    if ($read -le 0) {
+      throw "Solicitud vacia"
+    }
+
+    $memory.Write($buffer, 0, $read)
+    $bytes = $memory.ToArray()
+    $headerEnd = Find-HeaderEnd -Bytes $bytes -Length $bytes.Length
+
+    if ($memory.Length -gt 1048576) {
+      throw "Cabeceras demasiado grandes"
+    }
+  }
+
+  $allBytes = $memory.ToArray()
+  $headerText = [System.Text.Encoding]::ASCII.GetString($allBytes, 0, $headerEnd)
+  $lines = $headerText -split "`r`n"
+  $requestLine = $lines[0] -split " "
+
+  if ($requestLine.Length -lt 2) {
+    throw "Linea de solicitud invalida"
+  }
+
+  $headers = @{}
+  foreach ($line in $lines[1..($lines.Length - 1)]) {
+    if (-not $line) {
+      continue
+    }
+
+    $separator = $line.IndexOf(":")
+    if ($separator -gt 0) {
+      $name = $line.Substring(0, $separator).Trim().ToLowerInvariant()
+      $value = $line.Substring($separator + 1).Trim()
+      $headers[$name] = $value
+    }
+  }
+
+  return @{
+    Method = $requestLine[0].ToUpperInvariant()
+    Path = ($requestLine[1] -split "\?", 2)[0]
+    Headers = $headers
+    InitialBody = $allBytes[($headerEnd + 4)..($allBytes.Length - 1)]
+  }
+}
+
+function Proxy-Transcription {
+  param(
+    [System.Net.Sockets.NetworkStream]$Stream,
+    [hashtable]$Request
+  )
+
+  if (-not $Request.Headers.ContainsKey("content-length")) {
+    Write-TextResponse -Stream $Stream -StatusCode 411 -Reason "Length Required" -Text "Content-Length requerido"
+    return
+  }
+
+  $contentLength = [int64]$Request.Headers["content-length"]
+  $tempFile = [System.IO.Path]::GetTempFileName()
+  $file = [System.IO.File]::Open($tempFile, [System.IO.FileMode]::Create, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+
+  try {
+    $initial = [byte[]]$Request.InitialBody
+    if ($initial.Length -gt 0) {
+      $toWrite = [Math]::Min($initial.Length, $contentLength)
+      $file.Write($initial, 0, $toWrite)
+    }
+
+    $remaining = $contentLength - $file.Length
+    $buffer = [byte[]]::new(1048576)
+    while ($remaining -gt 0) {
+      $read = $Stream.Read($buffer, 0, [Math]::Min($buffer.Length, $remaining))
+      if ($read -le 0) {
+        throw "Solicitud incompleta"
+      }
+      $file.Write($buffer, 0, $read)
+      $remaining -= $read
+    }
+
+    $file.Position = 0
+
+    $client = [System.Net.Http.HttpClient]::new()
+    $client.Timeout = [TimeSpan]::FromHours(2)
+
+    $content = [System.Net.Http.StreamContent]::new($file)
+    $content.Headers.ContentLength = $contentLength
+    if ($Request.Headers.ContainsKey("content-type")) {
+      $content.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse($Request.Headers["content-type"])
+    }
+
+    $message = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post, "$UpstreamBaseUrl$TranscriptionPath")
+    $message.Content = $content
+    if ($Request.Headers.ContainsKey("accept")) {
+      $message.Headers.TryAddWithoutValidation("Accept", $Request.Headers["accept"]) | Out-Null
+    }
+    $message.Headers.TryAddWithoutValidation("User-Agent", "PrivetLocalProxy/1.0") | Out-Null
+
+    $response = $client.SendAsync($message).Result
+    $body = $response.Content.ReadAsByteArrayAsync().Result
+
+    $headers = @{
+      "Access-Control-Allow-Origin" = "*"
+      "Access-Control-Allow-Methods" = "POST, OPTIONS"
+      "Access-Control-Allow-Headers" = "Content-Type"
+    }
+
+    foreach ($header in $response.Headers.GetEnumerator()) {
+      $headers[$header.Key] = ($header.Value -join ", ")
+    }
+    foreach ($header in $response.Content.Headers.GetEnumerator()) {
+      if ($header.Key -ne "Content-Length") {
+        $headers[$header.Key] = ($header.Value -join ", ")
+      }
+    }
+
+    $headers["Content-Length"] = [string]$body.Length
+    Write-RawResponse -Stream $Stream -StatusCode ([int]$response.StatusCode) -Reason $response.ReasonPhrase -Headers $headers -Body $body
+  }
+  catch {
+    Write-TextResponse -Stream $Stream -StatusCode 502 -Reason "Bad Gateway" -Text "No se pudo conectar con el backend: $_"
+  }
+  finally {
+    if ($file) {
+      $file.Dispose()
+    }
+    Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Handle-Client {
+  param([System.Net.Sockets.TcpClient]$Client)
+
+  $stream = $Client.GetStream()
+
+  try {
+    $request = Read-Request -Stream $stream
+
+    if ($request.Method -eq "GET" -and $request.Path -eq "/assets/js/runtime-config.js") {
+      Write-RuntimeConfig -Stream $stream
+    }
+    elseif ($request.Method -eq "GET") {
+      Write-StaticFile -Stream $stream -RequestPath $request.Path
+    }
+    elseif ($request.Method -eq "OPTIONS" -and $request.Path -eq $TranscriptionPath) {
+      Write-RawResponse -Stream $stream -StatusCode 204 -Reason "No Content" -Headers @{
+        "Access-Control-Allow-Origin" = "*"
+        "Access-Control-Allow-Methods" = "POST, OPTIONS"
+        "Access-Control-Allow-Headers" = "Content-Type"
+      }
+    }
+    elseif ($request.Method -eq "POST" -and $request.Path -eq $TranscriptionPath) {
+      Proxy-Transcription -Stream $stream -Request $request
+    }
+    else {
+      Write-TextResponse -Stream $stream -StatusCode 404 -Reason "Not Found" -Text "Ruta no encontrada"
+    }
+  }
+  catch {
+    try {
+      Write-TextResponse -Stream $stream -StatusCode 500 -Reason "Internal Server Error" -Text "Error local: $_"
+    }
+    catch {
+      # El cliente ya puede haberse desconectado.
+    }
+  }
+  finally {
+    $stream.Dispose()
+    $Client.Close()
+  }
+}
+
+$listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Parse("127.0.0.1"), $Port)
+$listener.Start()
+
+Write-Host "Privet local: http://127.0.0.1:$Port/"
+Write-Host "Backend proxy: $UpstreamBaseUrl$TranscriptionPath"
+Write-Host "Deja esta ventana abierta mientras uses la pagina."
+
+try {
+  while ($true) {
+    $client = $listener.AcceptTcpClient()
+    Handle-Client -Client $client
+  }
+}
+finally {
+  $listener.Stop()
+}

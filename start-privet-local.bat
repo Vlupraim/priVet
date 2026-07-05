@@ -19,7 +19,13 @@ where py >nul 2>nul
 if %errorlevel%==0 (
   py -3 "%~dp0local-server.py"
 ) else (
-  python "%~dp0local-server.py"
+  where python >nul 2>nul
+  if %errorlevel%==0 (
+    python "%~dp0local-server.py"
+  ) else (
+    echo No se encontro Python. Usando servidor PowerShell incluido en Windows.
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0local-server.ps1"
+  )
 )
 
 pause
