@@ -8,14 +8,15 @@ Esto evita problemas CORS cuando el navegador corre la pagina desde el PC.
 
 from __future__ import annotations
 
-import http.client
 import json
 import os
 import re
+import shutil
+import subprocess
 import tempfile
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import quote, unquote
 
 
 ROOT = Path(__file__).resolve().parent
@@ -99,52 +100,44 @@ class PrivetLocalHandler(SimpleHTTPRequestHandler):
             self.send_error(400, "Content-Length invalido")
             return
 
-        with tempfile.TemporaryFile() as payload:
-            remaining = length
-            while remaining:
-                chunk = self.rfile.read(min(1024 * 1024, remaining))
-                if not chunk:
-                    break
-                payload.write(chunk)
-                remaining -= len(chunk)
+        payload_path = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False) as payload:
+                payload_path = Path(payload.name)
+                remaining = length
+                while remaining:
+                    chunk = self.rfile.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        break
+                    payload.write(chunk)
+                    remaining -= len(chunk)
 
-            if remaining:
-                self.send_error(400, "Solicitud incompleta")
-                return
+                if remaining:
+                    self.send_error(400, "Solicitud incompleta")
+                    return
 
-            payload.seek(0)
-            self._send_to_upstream(payload, length)
+            self._send_to_upstream(payload_path, length)
+        finally:
+            if payload_path:
+                payload_path.unlink(missing_ok=True)
 
-    def _send_to_upstream(self, payload, length: int):
-        target = urlsplit(f"{UPSTREAM_BASE_URL}{TRANSCRIPTION_PATH}")
-        conn_class = http.client.HTTPSConnection if target.scheme == "https" else http.client.HTTPConnection
-        conn = conn_class(target.netloc, timeout=60 * 60)
-        target_path = target.path or TRANSCRIPTION_PATH
-        if target.query:
-            target_path = f"{target_path}?{target.query}"
-
-        headers = {
-            "Accept": self.headers.get("Accept", "*/*"),
-            "Content-Length": str(length),
-            "Content-Type": self.headers.get("Content-Type", "application/octet-stream"),
-            "User-Agent": "PrivetLocalProxy/1.0",
-        }
+    def _send_to_upstream(self, payload_path: Path, length: int):
         output_filename = self._resolve_output_filename()
 
         try:
-            conn.request("POST", target_path, body=payload, headers=headers)
-            response = conn.getresponse()
-            response_body = response.read()
+            status, reason, response_headers, response_body = self._send_to_upstream_with_curl(
+                payload_path
+            )
             saved_path = ""
             save_error = ""
 
-            if 200 <= response.status < 300:
+            if 200 <= status < 300:
                 try:
                     saved_path = self._save_transcription(response_body, output_filename)
                 except Exception as exc:
                     save_error = str(exc)
 
-            self.send_response(response.status, response.reason)
+            self.send_response(status, reason)
             self._send_cors_headers()
 
             skipped_headers = {
@@ -158,7 +151,7 @@ class PrivetLocalHandler(SimpleHTTPRequestHandler):
                 "transfer-encoding",
                 "upgrade",
             }
-            for name, value in response.getheaders():
+            for name, value in response_headers:
                 if name.lower() not in skipped_headers:
                     self.send_header(name, value)
 
@@ -179,8 +172,113 @@ class PrivetLocalHandler(SimpleHTTPRequestHandler):
             self.send_header("Content-Length", str(len(message)))
             self.end_headers()
             self.wfile.write(message)
+
+    def _send_to_upstream_with_curl(self, payload_path: Path):
+        curl_path = shutil.which("curl.exe") or shutil.which("curl")
+        if not curl_path:
+            raise RuntimeError("No se encontro curl.exe en este Windows.")
+
+        endpoint = f"{UPSTREAM_BASE_URL}{TRANSCRIPTION_PATH}"
+        content_type = self.headers.get("Content-Type", "application/octet-stream")
+        accept = self.headers.get("Accept", "*/*")
+
+        with tempfile.NamedTemporaryFile(delete=False) as body_file, tempfile.NamedTemporaryFile(
+            delete=False
+        ) as header_file:
+            body_path = Path(body_file.name)
+            header_path = Path(header_file.name)
+
+        try:
+            command = [
+                curl_path,
+                "--silent",
+                "--show-error",
+                "--location",
+                "--http1.1",
+                "--request",
+                "POST",
+                endpoint,
+                "--header",
+                f"Content-Type: {content_type}",
+                "--header",
+                f"Accept: {accept}",
+                "--header",
+                "Expect:",
+                "--header",
+                "User-Agent: PrivetLocalProxy/1.0",
+                "--data-binary",
+                f"@{payload_path}",
+                "--dump-header",
+                str(header_path),
+                "--output",
+                str(body_path),
+                "--max-time",
+                "7200",
+                "--connect-timeout",
+                "30",
+                "--write-out",
+                "%{http_code}",
+            ]
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=60 * 60 * 2,
+                check=False,
+            )
+
+            if completed.returncode != 0:
+                detail = (completed.stderr or completed.stdout or "curl no pudo completar la solicitud").strip()
+                raise RuntimeError(detail)
+
+            try:
+                status = int((completed.stdout or "").strip()[-3:])
+            except ValueError as exc:
+                raise RuntimeError(f"curl no devolvio un codigo HTTP valido: {completed.stdout}") from exc
+
+            response_headers = self._parse_curl_headers(header_path.read_text(encoding="iso-8859-1"))
+            reason = self._reason_from_status(status, response_headers)
+            response_body = body_path.read_bytes()
+            return status, reason, response_headers, response_body
         finally:
-            conn.close()
+            body_path.unlink(missing_ok=True)
+            header_path.unlink(missing_ok=True)
+
+    @staticmethod
+    def _parse_curl_headers(raw_headers):
+        blocks = [block for block in raw_headers.replace("\r\n", "\n").split("\n\n") if block.strip()]
+        if not blocks:
+            return []
+
+        last_block = blocks[-1]
+        lines = last_block.splitlines()
+        headers = []
+        for line in lines[1:]:
+            if ":" not in line:
+                continue
+            name, value = line.split(":", 1)
+            headers.append((name.strip(), value.strip()))
+
+        return headers
+
+    @staticmethod
+    def _reason_from_status(status, response_headers):
+        # BaseHTTPRequestHandler accepts an arbitrary reason phrase.
+        reasons = {
+            200: "OK",
+            201: "Created",
+            204: "No Content",
+            400: "Bad Request",
+            404: "Not Found",
+            408: "Request Timeout",
+            413: "Payload Too Large",
+            422: "Unprocessable Entity",
+            500: "Internal Server Error",
+            502: "Bad Gateway",
+            503: "Service Unavailable",
+            504: "Gateway Timeout",
+        }
+        return reasons.get(status, "OK")
 
     def _resolve_output_filename(self):
         encoded_name = self.headers.get("X-Privet-Output-Filename", "")

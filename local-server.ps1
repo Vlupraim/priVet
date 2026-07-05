@@ -258,6 +258,124 @@ function Save-Transcription {
   return $candidate
 }
 
+function Get-StatusReason {
+  param([int]$StatusCode)
+
+  switch ($StatusCode) {
+    200 { "OK"; break }
+    201 { "Created"; break }
+    204 { "No Content"; break }
+    400 { "Bad Request"; break }
+    404 { "Not Found"; break }
+    408 { "Request Timeout"; break }
+    413 { "Payload Too Large"; break }
+    422 { "Unprocessable Entity"; break }
+    500 { "Internal Server Error"; break }
+    502 { "Bad Gateway"; break }
+    503 { "Service Unavailable"; break }
+    504 { "Gateway Timeout"; break }
+    default { "OK"; break }
+  }
+}
+
+function Read-CurlHeaders {
+  param([string]$HeaderPath)
+
+  $raw = [System.IO.File]::ReadAllText($HeaderPath, [System.Text.Encoding]::GetEncoding("iso-8859-1"))
+  $blocks = $raw.Replace("`r`n", "`n").Split("`n`n") | Where-Object { $_.Trim() }
+  $headers = @{}
+  if (-not $blocks -or $blocks.Count -eq 0) {
+    return $headers
+  }
+
+  $lines = $blocks[-1].Split("`n")
+  foreach ($line in $lines[1..($lines.Length - 1)]) {
+    if (-not $line -or -not $line.Contains(":")) {
+      continue
+    }
+
+    $separator = $line.IndexOf(":")
+    $name = $line.Substring(0, $separator).Trim()
+    $value = $line.Substring($separator + 1).Trim()
+    $headers[$name] = $value
+  }
+
+  return $headers
+}
+
+function Invoke-UpstreamWithCurl {
+  param(
+    [string]$PayloadPath,
+    [hashtable]$Headers
+  )
+
+  $curlCommand = Get-Command curl.exe -ErrorAction SilentlyContinue
+  if (-not $curlCommand) {
+    throw "No se encontro curl.exe en este Windows."
+  }
+
+  $bodyPath = [System.IO.Path]::GetTempFileName()
+  $headerPath = [System.IO.Path]::GetTempFileName()
+  $contentType = if ($Headers.ContainsKey("content-type")) { $Headers["content-type"] } else { "application/octet-stream" }
+  $accept = if ($Headers.ContainsKey("accept")) { $Headers["accept"] } else { "*/*" }
+
+  try {
+    $curlArgs = @(
+      "--silent",
+      "--show-error",
+      "--location",
+      "--http1.1",
+      "--request",
+      "POST",
+      "$UpstreamBaseUrl$TranscriptionPath",
+      "--header",
+      "Content-Type: $contentType",
+      "--header",
+      "Accept: $accept",
+      "--header",
+      "Expect:",
+      "--header",
+      "User-Agent: PrivetLocalProxy/1.0",
+      "--data-binary",
+      "@$PayloadPath",
+      "--dump-header",
+      $headerPath,
+      "--output",
+      $bodyPath,
+      "--max-time",
+      "7200",
+      "--connect-timeout",
+      "30",
+      "--write-out",
+      "%{http_code}"
+    )
+
+    $curlOutput = & $curlCommand.Source @curlArgs 2>&1
+    $curlExitCode = $LASTEXITCODE
+    $curlText = ($curlOutput | Out-String).Trim()
+
+    if ($curlExitCode -ne 0) {
+      throw $(if ($curlText) { $curlText } else { "curl no pudo completar la solicitud." })
+    }
+
+    if ($curlText.Length -lt 3) {
+      throw "curl no devolvio un codigo HTTP valido: $curlText"
+    }
+
+    $statusCode = [int]$curlText.Substring($curlText.Length - 3, 3)
+    return @{
+      StatusCode = $statusCode
+      Reason = Get-StatusReason -StatusCode $statusCode
+      Headers = Read-CurlHeaders -HeaderPath $headerPath
+      Body = [System.IO.File]::ReadAllBytes($bodyPath)
+    }
+  }
+  finally {
+    Remove-Item -LiteralPath $bodyPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $headerPath -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Proxy-Transcription {
   param(
     [System.Net.Sockets.NetworkStream]$Stream,
@@ -291,26 +409,11 @@ function Proxy-Transcription {
       $remaining -= $read
     }
 
-    $file.Position = 0
+    $file.Dispose()
+    $file = $null
 
-    $client = [System.Net.Http.HttpClient]::new()
-    $client.Timeout = [TimeSpan]::FromHours(2)
-
-    $content = [System.Net.Http.StreamContent]::new($file)
-    $content.Headers.ContentLength = $contentLength
-    if ($Request.Headers.ContainsKey("content-type")) {
-      $content.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse($Request.Headers["content-type"])
-    }
-
-    $message = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post, "$UpstreamBaseUrl$TranscriptionPath")
-    $message.Content = $content
-    if ($Request.Headers.ContainsKey("accept")) {
-      $message.Headers.TryAddWithoutValidation("Accept", $Request.Headers["accept"]) | Out-Null
-    }
-    $message.Headers.TryAddWithoutValidation("User-Agent", "PrivetLocalProxy/1.0") | Out-Null
-
-    $response = $client.SendAsync($message).Result
-    $body = $response.Content.ReadAsByteArrayAsync().Result
+    $response = Invoke-UpstreamWithCurl -PayloadPath $tempFile -Headers $Request.Headers
+    $body = [byte[]]$response.Body
     $savedPath = ""
     $saveError = ""
 
@@ -331,11 +434,8 @@ function Proxy-Transcription {
     }
 
     foreach ($header in $response.Headers.GetEnumerator()) {
-      $headers[$header.Key] = ($header.Value -join ", ")
-    }
-    foreach ($header in $response.Content.Headers.GetEnumerator()) {
-      if ($header.Key -ne "Content-Length") {
-        $headers[$header.Key] = ($header.Value -join ", ")
+      if ($header.Key.ToLowerInvariant() -notin @("connection", "content-length", "keep-alive", "transfer-encoding")) {
+        $headers[$header.Key] = [string]$header.Value
       }
     }
 
@@ -346,7 +446,7 @@ function Proxy-Transcription {
     if ($saveError) {
       $headers["X-Privet-Save-Error"] = [Uri]::EscapeDataString($saveError)
     }
-    Write-RawResponse -Stream $Stream -StatusCode ([int]$response.StatusCode) -Reason $response.ReasonPhrase -Headers $headers -Body $body
+    Write-RawResponse -Stream $Stream -StatusCode ([int]$response.StatusCode) -Reason $response.Reason -Headers $headers -Body $body
   }
   catch {
     Write-TextResponse -Stream $Stream -StatusCode 502 -Reason "Bad Gateway" -Text "No se pudo conectar con el backend: $_"

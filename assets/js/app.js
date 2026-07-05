@@ -29,7 +29,7 @@ const CONFIG = {
       ? window.APP_CONFIG.LOCAL_OUTPUT_DIR || ""
       : "",
   TRANSCRIBE_PATH: "/audio/transcription/",
-  REQUEST_TIMEOUT_MS: 8 * 60 * 1000,
+  REQUEST_TIMEOUT_MS: 2 * 60 * 60 * 1000,
 };
 
 /**
